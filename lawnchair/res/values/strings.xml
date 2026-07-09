@@ -789,6 +789,10 @@
 
     <!-- Search providers -->
     <string name="search_provider_app_search">App search</string>
+    <string name="search_provider_nexus" translatable="false">Nexus</string>
+    <!-- Nexus chat bar disabled-state nudges -->
+    <string name="nexus_install_prompt">Install the Nexus app to use the assistant</string>
+    <string name="nexus_configure_prompt">Open Nexus and set a server</string>
     <string name="search_provider_startpage" translatable="false">Startpage</string>
     <string name="search_provider_startpage_eu" translatable="false">Startpage (EU)</string>
     <string name="search_provider_google" translatable="false">Google</string>

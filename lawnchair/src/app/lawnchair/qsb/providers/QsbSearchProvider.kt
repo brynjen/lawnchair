@@ -120,6 +120,7 @@ sealed class QsbSearchProvider(
 
         fun values() = listOf(
             AppSearch,
+            Nexus,
             Google,
             GoogleGo,
             Youtube,
@@ -161,7 +162,10 @@ sealed class QsbSearchProvider(
                 LawnQsbLayout.resolveIntent(context, defaultProvider.createSearchIntent())
 
             // Return the default value from config.xml if the value is valid
-            if (isDefaultProviderIntentResolved || defaultProvider.type == QsbSearchProviderType.WEBSITE) {
+            if (isDefaultProviderIntentResolved ||
+                defaultProvider.type == QsbSearchProviderType.WEBSITE ||
+                defaultProvider.type == QsbSearchProviderType.LOCAL
+            ) {
                 if (defaultProvider != AppSearch ||
                     (defaultProvider == AppSearch && defaultProviderId == AppSearch.id)
                 ) {

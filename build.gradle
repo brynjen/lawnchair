@@ -159,6 +159,21 @@ android {
         buildConfigField "String", "COMMIT_HASH", "\"${buildCommit}\""
         buildConfigField "boolean", "ENABLE_AUTO_INSTALLS_LAYOUT", "false"
 
+        // Nexus interim shared access-token gate. The real secret is NEVER committed — it is read
+        // at build time from (in order) the NEXUS_ACCESS_TOKEN env var, the gitignored
+        // local.properties, or a Gradle property, falling back to the public placeholder. Sent as
+        // the Authorization header on unary calls and the omsc auth field on the streaming
+        // WebSocket. Replaced by Supabase auth later.
+        def nexusLocalProps = new Properties()
+        def nexusLocalPropsFile = rootProject.file("local.properties")
+        if (nexusLocalPropsFile.exists()) {
+            nexusLocalPropsFile.withInputStream { nexusLocalProps.load(it) }
+        }
+        def nexusAccessToken = System.getenv("NEXUS_ACCESS_TOKEN") ?:
+            (nexusLocalProps.getProperty("NEXUS_ACCESS_TOKEN") ?:
+            (project.findProperty("NEXUS_ACCESS_TOKEN") ?: "yoursupersecretlocaldevkey"))
+        buildConfigField "String", "NEXUS_ACCESS_TOKEN", "\"${nexusAccessToken}\""
+
         manifestPlaceholders.quickstepMinSdk = quickstepMinSdk
         manifestPlaceholders.quickstepMaxSdk = quickstepMaxSdk
         buildConfigField "int", "QUICKSTEP_MIN_SDK", quickstepMinSdk

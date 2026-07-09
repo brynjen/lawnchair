@@ -19,10 +19,13 @@ import app.lawnchair.preferences.preferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.preferences2.asState
 import app.lawnchair.preferences2.firstCached
+import app.lawnchair.nexus.chat.NexusChatOverlay
 import app.lawnchair.qsb.providers.AppSearch
 import app.lawnchair.qsb.providers.Google
+import app.lawnchair.qsb.providers.Nexus
 import app.lawnchair.qsb.providers.PixelSearch
 import app.lawnchair.qsb.providers.QsbSearchProvider
+import app.lawnchair.qsb.providers.QsbSearchProviderType
 import app.lawnchair.ui.theme.LawnchairTheme
 import app.lawnchair.util.ProvideLifecycleState
 import app.lawnchair.util.repeatOnAttached
@@ -96,12 +99,18 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                         val actions = QsbActions(
                             onQsbClick = {
                                 val launcher = context.launcher
-                                launcher.lifecycleScope.launch {
-                                    if (prefs2.matchHotseatQsbStyle.firstCached()) {
-                                        launcher.appsView.searchUiManager.editText?.showKeyboard()
-                                        launcher.animateToAllApps()
-                                    } else {
-                                        searchProvider.launch(launcher)
+                                if (searchProvider == Nexus) {
+                                    // Nexus is a local provider: open the in-process chat overlay
+                                    // (or the install/configure nudge when the app isn't ready).
+                                    NexusChatOverlay.openFromQsb(launcher)
+                                } else {
+                                    launcher.lifecycleScope.launch {
+                                        if (prefs2.matchHotseatQsbStyle.firstCached()) {
+                                            launcher.appsView.searchUiManager.editText?.showKeyboard()
+                                            launcher.animateToAllApps()
+                                        } else {
+                                            searchProvider.launch(launcher)
+                                        }
                                     }
                                 }
                             },
@@ -205,6 +214,7 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
             provider: QsbSearchProvider,
         ): QsbSearchProvider {
             return if (provider == AppSearch ||
+                provider.type == QsbSearchProviderType.LOCAL ||
                 resolveIntent(context, provider.createSearchIntent()) ||
                 resolveIntent(context, provider.createWebsiteIntent())
             ) {

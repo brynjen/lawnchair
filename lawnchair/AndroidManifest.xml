@@ -20,6 +20,15 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Read the Nexus app's config/presence via its signature-protected ContentProvider.
+         Granted only when this launcher is signed with the same key as no.nordli.nexus;
+         otherwise the read is denied and the bar shows as not-configured. -->
+    <uses-permission android:name="no.nordli.nexus.permission.READ_CONFIG" />
+    <!-- So getPackageInfo("no.nordli.nexus") + the content query resolve on Android 11+. -->
+    <queries>
+        <package android:name="no.nordli.nexus" />
+        <provider android:authorities="no.nordli.nexus.config" />
+    </queries>
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />

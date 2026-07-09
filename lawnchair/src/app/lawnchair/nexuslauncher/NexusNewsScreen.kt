@@ -37,6 +37,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,8 +62,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.lawnchair.nexus.NexusConfig
+import app.lawnchair.nexus.net.NexusClient
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // Nexus design tokens (mirrors nexus_mobile core/tokens.dart, dark palette).
 private val Bg = Color(0xFF0A0A12)
@@ -241,6 +246,30 @@ private fun ListScreen(
 
 @Composable
 private fun Header(loading: Boolean) {
+    // Live connection dot: while the News overlay is on screen, actively poll the server
+    // (this is the one place active polling is allowed — the user is looking at dynamic content).
+    // teal = online, red = offline/unreachable, grey = not configured / unknown. The effect is
+    // cancelled automatically when the overlay leaves composition, so it never polls in the
+    // background.
+    val context = LocalContext.current
+    var online by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) {
+        val client = NexusClient()
+        while (true) {
+            val status = withContext(Dispatchers.IO) { NexusConfig.read(context) }
+            online = if (status.enabled) {
+                withContext(Dispatchers.IO) { client.ping(status.serverUrl, NexusConfig.accessToken) }
+            } else {
+                null
+            }
+            delay(10_000)
+        }
+    }
+    val dotColor = when (online) {
+        true -> Good
+        false -> Color(0xFFFF6B6B)
+        null -> Text3
+    }
     Column(Modifier.fillMaxWidth().padding(16.dp, 12.dp, 16.dp, 0.dp)) {
         Box(Modifier.fillMaxWidth()) {
             Text(
@@ -253,7 +282,7 @@ private fun Header(loading: Boolean) {
                     .align(Alignment.CenterEnd)
                     .size(10.dp)
                     .clip(CircleShape)
-                    .background(Good),
+                    .background(dotColor),
             )
         }
         Spacer(Modifier.height(20.dp))

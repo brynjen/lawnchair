@@ -62,7 +62,7 @@
     <dimen name="page_indicator_dot_size_v2">6dp</dimen>
 
     <!-- Which QSB search provider to use by default -->
-    <string name="config_default_qsb_search_provider_id" translatable="false">google</string>
+    <string name="config_default_qsb_search_provider_id" translatable="false">nexus</string>
 
     <!-- Which icon shape for application to use by default -->
     <string name="config_default_icon_shape" translatable="false">system</string>
