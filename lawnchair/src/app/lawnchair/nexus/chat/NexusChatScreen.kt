@@ -2,6 +2,7 @@ package app.lawnchair.nexus.chat
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import app.lawnchair.nexus.NexusConfig
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -79,6 +80,12 @@ fun NexusChatScreen(
     onClose: () -> Unit,
 ) {
     val context = LocalContext.current
+    // Installed but not configured against a server yet → guide the user to finish setup instead
+    // of showing a dead composer.
+    if (serverUrl.isBlank()) {
+        NexusSetupPrompt(onClose = onClose)
+        return
+    }
     val scope = rememberCoroutineScope()
     val client = remember { NexusClient() }
 
@@ -209,6 +216,69 @@ fun NexusChatScreen(
                 Toast.makeText(context, "Voice — coming soon", Toast.LENGTH_SHORT).show()
             },
         )
+    }
+}
+
+@Composable
+private fun NexusSetupPrompt(onClose: () -> Unit) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Bg)
+            .windowInsetsPadding(WindowInsets.systemBars),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NeuralOrb(modifier = Modifier.size(28.dp), accent = Accent, loading = false)
+            Spacer(Modifier.width(12.dp))
+            BasicText(
+                text = "Nexus",
+                style = TextStyle(color = TextC, fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                modifier = Modifier.clip(CircleShape).clickable(onClick = onClose).padding(8.dp),
+            ) { BasicText(text = "✕", style = TextStyle(color = Text2, fontSize = 18.sp)) }
+        }
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            BasicText(
+                text = "Finish setting up Nexus",
+                style = TextStyle(color = TextC, fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
+            )
+            Spacer(Modifier.height(10.dp))
+            BasicText(
+                text = "Open the Nexus app and connect it to a server to start chatting from here.",
+                style = TextStyle(color = Text3, fontSize = 15.sp),
+            )
+            Spacer(Modifier.height(24.dp))
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Accent)
+                    .clickable {
+                        runCatching {
+                            context.packageManager.getLaunchIntentForPackage(NexusConfig.APP_PACKAGE)
+                                ?.let { context.startActivity(it) }
+                        }
+                        onClose()
+                    }
+                    .padding(horizontal = 24.dp, vertical = 12.dp),
+            ) {
+                BasicText(
+                    text = "Open Nexus",
+                    style = TextStyle(color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                )
+            }
+        }
     }
 }
 

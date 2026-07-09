@@ -54,26 +54,18 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
          */
         fun openFromQsb(launcher: LawnchairLauncher) {
             val status = NexusConfig.read(launcher)
-            when {
-                status.enabled -> NexusChatOverlay(launcher).show(status.serverUrl, NexusConfig.accessToken)
-                !status.installed -> {
-                    // App not installed. It's sideloaded (not on Play), so just tell the user —
-                    // a market:// link would land on a confusing Play "item not found" page.
-                    Toast.makeText(
-                        launcher,
-                        launcher.getString(com.android.launcher3.R.string.nexus_install_prompt),
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
-                else -> {
-                    // Installed but not configured against a server — open the app so the user can set one.
-                    Toast.makeText(launcher, launcher.getString(com.android.launcher3.R.string.nexus_configure_prompt), Toast.LENGTH_LONG).show()
-                    runCatching {
-                        launcher.packageManager.getLaunchIntentForPackage(NexusConfig.APP_PACKAGE)
-                            ?.let { launcher.startActivity(it) }
-                    }
-                }
+            if (!status.installed) {
+                // App not installed (sideloaded, not on Play) — just tell the user.
+                Toast.makeText(
+                    launcher,
+                    launcher.getString(com.android.launcher3.R.string.nexus_install_prompt),
+                    Toast.LENGTH_LONG,
+                ).show()
+                return
             }
+            // Installed: open the chat window. If the app isn't configured against a server yet,
+            // serverUrl is blank and the overlay shows a "finish setup" prompt instead of the composer.
+            NexusChatOverlay(launcher).show(status.serverUrl, NexusConfig.accessToken)
         }
     }
 }

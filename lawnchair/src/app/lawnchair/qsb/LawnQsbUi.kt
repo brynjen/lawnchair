@@ -31,6 +31,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color as ComposeColor
 import androidx.compose.ui.graphics.Shape
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.lawnchair.qsb.providers.Google
 import app.lawnchair.qsb.providers.GoogleGo
+import app.lawnchair.qsb.providers.Nexus
 import app.lawnchair.qsb.providers.PixelSearch
 import app.lawnchair.qsb.providers.QsbSearchProvider
 import app.lawnchair.ui.theme.LawnchairTheme
@@ -59,6 +61,7 @@ enum class QsbIconId {
     SEARCH,
     MIC,
     LENS,
+    CAMERA,
     CLEAR,
 }
 
@@ -80,6 +83,8 @@ data class QsbIconState(
     val contentDescription: String,
     val method: ThemingMethod = ThemingMethod.THEME_BY_LAYER_ID,
     val visible: Boolean = true,
+    /** When false the icon renders dimmed (e.g. the Nexus camera — image input is a roadmap stub). */
+    val enabled: Boolean = true,
 )
 
 /**
@@ -184,6 +189,41 @@ fun rememberHotseatQsbState(
     val lensLabel = stringResource(R.string.label_lens)
 
     return remember(searchProvider, themed, showMic, showLens, searchLabel, voiceSearchLabel, lensLabel) {
+        // Nexus chat bar: full-colour Nexus glyph on the left; a disabled camera (image input is a
+        // roadmap stub) and an active mic (push-to-talk) on the right. Tapping the bar opens the
+        // chat overlay (wired in LawnQsbLayout), not an app/provider launch.
+        if (searchProvider == Nexus) {
+            return@remember QsbState(
+                contentDescription = searchLabel,
+                startIcon = QsbIconState(
+                    id = QsbIconId.SEARCH,
+                    resId = R.drawable.ic_nexus,
+                    themed = false, // keep the brand icon full-colour, never tinted monochrome
+                    method = ThemingMethod.TINT,
+                    contentDescription = searchLabel,
+                ),
+                endIcons = listOf(
+                    QsbIconState(
+                        id = QsbIconId.CAMERA,
+                        resId = R.drawable.ic_camera_flat,
+                        themed = true,
+                        method = ThemingMethod.TINT,
+                        contentDescription = "Camera (coming soon)",
+                        visible = true,
+                        enabled = false,
+                    ),
+                    QsbIconState(
+                        id = QsbIconId.MIC,
+                        resId = R.drawable.ic_mic_flat,
+                        themed = true,
+                        method = ThemingMethod.TINT,
+                        contentDescription = voiceSearchLabel,
+                        visible = true,
+                    ),
+                ),
+            )
+        }
+
         val iconRes = if (themed) searchProvider.themedIcon else searchProvider.icon
         val isGoogleProvider = searchProvider == Google || searchProvider == GoogleGo || searchProvider == PixelSearch
 
@@ -446,7 +486,9 @@ fun QsbIcon(
             ),
             contentDescription = icon.contentDescription,
             tint = ComposeColor.Unspecified,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .alpha(if (icon.enabled) 1f else 0.4f),
         )
     }
 }

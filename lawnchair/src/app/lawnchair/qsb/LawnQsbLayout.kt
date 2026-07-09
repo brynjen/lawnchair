@@ -2,6 +2,7 @@ package app.lawnchair.qsb
 
 import android.content.ComponentName
 import android.content.Context
+import android.widget.Toast
 import android.content.Intent
 import android.util.AttributeSet
 import android.widget.FrameLayout
@@ -117,9 +118,14 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                             onStartIconClick = null,
                             onEndIconClick = { id ->
                                 runCatching {
-                                    when (id) {
-                                        QsbIconId.MIC -> voiceIntent?.let { context.startActivity(it) }
-                                        QsbIconId.LENS -> lensIntent?.let { context.startActivity(it) }
+                                    when {
+                                        searchProvider == Nexus && id == QsbIconId.MIC ->
+                                            // Push-to-talk not built yet — open the chat overlay.
+                                            NexusChatOverlay.openFromQsb(context.launcher)
+                                        searchProvider == Nexus && id == QsbIconId.CAMERA ->
+                                            Toast.makeText(context, "Image input — coming soon", Toast.LENGTH_SHORT).show()
+                                        id == QsbIconId.MIC -> voiceIntent?.let { context.startActivity(it) }
+                                        id == QsbIconId.LENS -> lensIntent?.let { context.startActivity(it) }
                                         else -> null
                                     }
                                 }
