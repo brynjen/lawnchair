@@ -86,6 +86,7 @@
         android:largeHeap="@bool/config_largeHeap"
         android:restoreAnyVersion="true"
         android:supportsRtl="true"
+        android:usesCleartextTraffic="true"
         tools:replace="android:label">
 
         <!-- Intent received when a session is committed -->
