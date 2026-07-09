@@ -772,7 +772,9 @@ class PreferenceManager2 @Inject constructor(
 
     val wallpaperDepthEffect = preference(
         key = booleanPreferencesKey(name = "enable_wallpaper_depth_effect"),
-        defaultValue = true,
+        // Nexus: default OFF — the depth effect flashes a black frame on folder
+        // open on the 16-dev branch.
+        defaultValue = false,
         onSet = { reloadHelper.recreate() },
     )
 

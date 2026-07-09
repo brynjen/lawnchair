@@ -224,8 +224,7 @@ android {
         }
 
         debug {
-            applicationIdSuffix ".debug"
-            resValue("string", "derived_app_name", "Lawnchair (Debug)")
+            resValue("string", "derived_app_name", "NexusLauncher")
 
             manifestPlaceholders.quickstepMinSdk = "0"
             manifestPlaceholders.quickstepMaxSdk = "100000"
@@ -234,7 +233,7 @@ android {
         }
 
         release {
-            resValue("string", "derived_app_name", "Lawnchair")
+            resValue("string", "derived_app_name", "NexusLauncher")
             minifyEnabled true
             shrinkResources true
             pseudoLocalesEnabled false
@@ -265,7 +264,7 @@ android {
         }
 
         github {
-            applicationId 'app.lawnchair'
+            applicationId 'no.nordli.nexus.launcher'
             dimension "channel"
         }
 
