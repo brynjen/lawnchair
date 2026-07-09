@@ -102,7 +102,7 @@ class NexusClient(
     ): String = suspendCancellableCoroutine { cont ->
         val request = Request.Builder()
             .url(unaryUrl(base, endpoint))
-            .apply { if (token.isNotEmpty()) header("Authorization", basicAuth(token)) }
+            .apply { if (token.isNotEmpty()) header("Authorization", bearer(token)) }
             .post(json.toString().toRequestBody(JSON_MEDIA))
             .build()
         val call = http.newCall(request)
@@ -167,7 +167,7 @@ class NexusClient(
                         .put("cid", cid)
                         .put("args", args) // JSON-encoded STRING, not a nested object
                         .put("is", JSONArray())
-                    if (token.isNotEmpty()) data.put("auth", token)
+                    if (token.isNotEmpty()) data.put("auth", bearer(token))
                     ws.send(JSONObject().put("type", "omsc").put("data", data).toString())
                 }
 
@@ -261,17 +261,13 @@ class NexusClient(
         private val JSON_MEDIA = "application/json".toMediaType()
 
         /**
-         * Wrap the token as a Basic auth value (`Basic base64(token)`) — matches Serverpod's
-         * `wrapAsBasicAuthHeaderValue`, which the server unwraps back to the raw token. Sending it
-         * schemeless risks the server's header validator rejecting the request before the gate runs.
+         * Wrap the token as a Bearer value (`Bearer <token>`). Serverpod unwraps it to the raw
+         * token; the gate compares that to NEXUS_ACCESS_TOKEN. Bearer (not Basic) because with
+         * `validateHeaders` on (the default) both the HTTP (Relic typed parser) and the WS
+         * (isValidAuthHeaderValue) paths require a valid scheme, and a `Basic` value whose base64
+         * isn't `user:pass` is rejected ("Invalid basic token format" → 400).
          */
-        private fun basicAuth(token: String): String {
-            val encoded = android.util.Base64.encodeToString(
-                token.toByteArray(Charsets.UTF_8),
-                android.util.Base64.NO_WRAP,
-            )
-            return "Basic $encoded"
-        }
+        private fun bearer(token: String): String = "Bearer $token"
 
         /** `{base}{endpoint}` with exactly one slash and no trailing slash on the endpoint. */
         fun unaryUrl(base: String, endpoint: String): String =
