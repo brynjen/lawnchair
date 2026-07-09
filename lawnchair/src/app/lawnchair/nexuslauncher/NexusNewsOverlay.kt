@@ -1,10 +1,6 @@
 package app.lawnchair.nexuslauncher
 
-import android.animation.Animator
-import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
-import android.graphics.Rect
-import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.platform.ComposeView
@@ -54,7 +50,6 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
         ensurePanel(parent)
         launcher.setLauncherOverlay(this)
         attached = true
-        Log.d(TAG, "attached: parent=$parent w=${parent.width}")
     }
 
     private fun ensurePanel(parent: ViewGroup) {
@@ -115,14 +110,6 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
         settleAnim = ValueAnimator.ofFloat(progress, target).apply {
             duration = 200
             addUpdateListener { setProgress(it.animatedValue as Float) }
-            addListener(object : AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: Animator) {
-                    val p = panel ?: return
-                    val r = Rect()
-                    p.getGlobalVisibleRect(r)
-                    Log.d(TAG, "settled: target=$target tx=${p.translationX} rect=$r")
-                }
-            })
             start()
         }
     }
@@ -143,7 +130,6 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
     }
 
     companion object {
-        private const val TAG = "NexusNewsOverlay"
         private const val FLING_THRESHOLD = 1000f
         private const val MATCH_PARENT = ViewGroup.LayoutParams.MATCH_PARENT
     }
