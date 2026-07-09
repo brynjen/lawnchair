@@ -149,6 +149,10 @@ class PreferenceManager @Inject constructor(
     val searchResultSettingsEntry = BoolPref("pref_searchResultSettingsEntry", false, recreate)
     val searchResulRecentSuggestion = BoolPref("pref_searchResultRecentSuggestion", false, recreate)
 
+    // One-shot guard: the Nexus fork defaults the dock search bar to the Nexus chat
+    // provider a single time (see LawnchairLauncher), then respects manual changes.
+    val nexusQsbDefaulted = BoolPref("nexus_qsb_defaulted", false)
+
     val themedIcons = BoolPref("themed_icons", false, reloadIcons)
     val drawerThemedIcons = BoolPref("drawer_themed_icons", false, reloadIcons)
     val tintIconPackBackgrounds = BoolPref("tint_icon_pack_backgrounds", false, reloadIcons)

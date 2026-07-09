@@ -43,6 +43,7 @@ import app.lawnchair.nexuslauncher.NexusNewsOverlay
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.preferences2.firstCached
+import app.lawnchair.qsb.providers.Nexus
 import app.lawnchair.root.RootHelperManager
 import app.lawnchair.root.RootNotAvailableException
 import app.lawnchair.theme.ThemeProvider
@@ -83,6 +84,7 @@ import com.android.systemui.plugins.shared.LauncherOverlayManager
 import com.android.systemui.shared.system.QuickStepContract
 import com.kieronquinn.app.smartspacer.sdk.client.SmartspacerClient
 import com.patrykmichalik.opto.core.onEach
+import com.patrykmichalik.opto.core.setBlocking
 import dev.kdrag0n.monet.theme.ColorScheme
 import java.util.stream.Stream
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -233,6 +235,14 @@ class LawnchairLauncher : QuickstepLauncher() {
             packageManager.getThemedIconPacksInstalled(this).isEmpty()
         ) {
             prefs.themedIcons.set(newValue = false)
+        }
+
+        // Nexus fork: make the dock search bar the Nexus chat provider once. Existing
+        // installs carry a persisted/legacy QSB provider that shadows the config.xml
+        // default, so switch it a single time (guarded). Later manual changes stick.
+        if (!prefs.nexusQsbDefaulted.get()) {
+            preferenceManager2.hotseatQsbProvider.setBlocking(Nexus)
+            prefs.nexusQsbDefaulted.set(true)
         }
 
         colorScheme = themeProvider.colorScheme
