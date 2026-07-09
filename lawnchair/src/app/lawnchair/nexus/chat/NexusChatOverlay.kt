@@ -1,7 +1,5 @@
 package app.lawnchair.nexus.chat
 
-import android.content.Intent
-import android.net.Uri
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -59,14 +57,13 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
             when {
                 status.enabled -> NexusChatOverlay(launcher).show(status.serverUrl, NexusConfig.accessToken)
                 !status.installed -> {
-                    // App not installed — send the user to install it.
-                    val market = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=${NexusConfig.APP_PACKAGE}"))
-                    val fallback = Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/details?id=${NexusConfig.APP_PACKAGE}"),
-                    )
-                    val launched = runCatching { launcher.startActivity(market); true }.getOrDefault(false)
-                    if (!launched) runCatching { launcher.startActivity(fallback) }
+                    // App not installed. It's sideloaded (not on Play), so just tell the user —
+                    // a market:// link would land on a confusing Play "item not found" page.
+                    Toast.makeText(
+                        launcher,
+                        launcher.getString(com.android.launcher3.R.string.nexus_install_prompt),
+                        Toast.LENGTH_LONG,
+                    ).show()
                 }
                 else -> {
                     // Installed but not configured against a server — open the app so the user can set one.
