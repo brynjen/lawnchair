@@ -20,6 +20,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Nexus voice: microphone capture for push-to-talk (requested at runtime on first mic use). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Read the Nexus app's config/presence via its signature-protected ContentProvider.
          Granted only when this launcher is signed with the same key as no.nordli.nexus;
          otherwise the read is denied and the bar shows as not-configured. -->

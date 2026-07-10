@@ -1,12 +1,16 @@
 package app.lawnchair.nexus.net
 
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
 import okhttp3.Callback
@@ -21,16 +25,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Kotlin re-implementation of the in-app assistant transport (the VoiceSquad endpoint) over the
- * raw Serverpod wire protocol. Unary calls are plain JSON-over-HTTP POSTs; the streamed answer is a
- * method-stream WebSocket. See `docs/nexus-search-bar-plan.md` for the confirmed wire facts.
+ * Kotlin re-implementation of the in-app assistant transport (the VoiceSquad + Audio endpoints) over
+ * the raw Serverpod wire protocol. Unary calls are plain JSON-over-HTTP POSTs; streamed answers and
+ * transcription are method-stream WebSockets. See `docs/nexus-search-bar-plan.md` for the confirmed
+ * wire facts.
  *
  * All calls carry the interim shared access token: unary as the `Authorization` header, the
  * WebSocket in the `omsc` `auth` field. An empty token is omitted.
  */
 class NexusClient(
     private val http: OkHttpClient = defaultHttpClient(),
-) {
+) : NexusTransport {
 
     // region unary
 
@@ -55,7 +60,7 @@ class NexusClient(
     }.getOrNull()
 
     /** `POST /voiceSquad {"method":"createConversation","title":null}` → conversation id. */
-    suspend fun createConversation(base: String, token: String): Int {
+    override suspend fun createConversation(base: String, token: String): Int {
         val body = post(
             base,
             "/voiceSquad",
@@ -65,8 +70,14 @@ class NexusClient(
         return body.trim().toInt()
     }
 
-    /** `POST /voiceSquad {conversationId, userText, turnId:null, method:"submitTurn"}` → void. */
-    suspend fun submitTurn(base: String, token: String, conversationId: Int, userText: String) {
+    /** `POST /voiceSquad {conversationId, userText, turnId, method:"submitTurn"}` → void. */
+    override suspend fun submitTurn(
+        base: String,
+        token: String,
+        conversationId: Int,
+        userText: String,
+        turnId: String,
+    ) {
         post(
             base,
             "/voiceSquad",
@@ -74,13 +85,18 @@ class NexusClient(
             JSONObject()
                 .put("conversationId", conversationId)
                 .put("userText", userText)
-                .put("turnId", JSONObject.NULL)
+                .put("turnId", turnId)
                 .put("method", "submitTurn"),
         )
     }
 
-    /** `POST /voiceSquad {conversationId, heardThroughSegmentIndex:null, method:"cancelTurn"}`. */
-    suspend fun cancelTurn(base: String, token: String, conversationId: Int) {
+    /** `POST /voiceSquad {conversationId, heardThroughSegmentIndex, method:"cancelTurn"}`. */
+    override suspend fun cancelTurn(
+        base: String,
+        token: String,
+        conversationId: Int,
+        heardThroughSegmentIndex: Int?,
+    ) {
         runCatching {
             post(
                 base,
@@ -88,7 +104,10 @@ class NexusClient(
                 token,
                 JSONObject()
                     .put("conversationId", conversationId)
-                    .put("heardThroughSegmentIndex", JSONObject.NULL)
+                    .put(
+                        "heardThroughSegmentIndex",
+                        heardThroughSegmentIndex ?: JSONObject.NULL,
+                    )
                     .put("method", "cancelTurn"),
             )
         }
@@ -130,7 +149,7 @@ class NexusClient(
 
     // endregion
 
-    // region streaming
+    // region streaming — turn
 
     /**
      * Opens a `streamTurn` method-stream and emits [NexusTurnEvent]s as they arrive. [onReady] fires
@@ -139,36 +158,25 @@ class NexusClient(
      * the terminal `completed`/`failed` event; cancelling the collection closes the socket (a `cmsc`
      * close command is sent first).
      */
-    fun streamTurn(
+    override fun streamTurn(
         base: String,
         token: String,
         conversationId: Int,
-        onReady: () -> Unit = {},
+        onReady: () -> Unit,
     ): Flow<NexusTurnEvent> =
         callbackFlow {
             val cid = UUID.randomUUID().toString()
             var closed = false
 
             fun sendClose(ws: WebSocket) {
-                val cmsc = JSONObject().put("type", "cmsc").put(
-                    "data",
-                    JSONObject().put("cid", cid).put("en", ENDPOINT).put("m", METHOD_STREAM_TURN),
-                )
-                runCatching { ws.send(cmsc.toString()) }
+                runCatching { ws.send(buildCmsc(cid, ENDPOINT_VOICE, METHOD_STREAM_TURN).toString()) }
                 runCatching { ws.close(1000, null) }
             }
 
             val listener = object : WebSocketListener() {
                 override fun onOpen(ws: WebSocket, response: Response) {
                     val args = JSONObject().put("conversationId", conversationId).toString()
-                    val data = JSONObject()
-                        .put("en", ENDPOINT)
-                        .put("m", METHOD_STREAM_TURN)
-                        .put("cid", cid)
-                        .put("args", args) // JSON-encoded STRING, not a nested object
-                        .put("is", JSONArray())
-                    if (token.isNotEmpty()) data.put("auth", bearer(token))
-                    ws.send(JSONObject().put("type", "omsc").put("data", data).toString())
+                    ws.send(buildOmsc(cid, ENDPOINT_VOICE, METHOD_STREAM_TURN, args, token).toString())
                 }
 
                 override fun onMessage(ws: WebSocket, text: String) {
@@ -231,9 +239,16 @@ class NexusClient(
     /** Unwrap a `msm` frame → `data.o.data` → a [NexusTurnEvent], or null for ignored kinds. */
     private fun parseTurnEvent(msg: JSONObject): NexusTurnEvent? {
         val data = msg.optJSONObject("data")?.optJSONObject("o")?.optJSONObject("data") ?: return null
+        val turnId = data.optString("turnId", "").ifEmpty { null }
         return when (data.optString("kind")) {
-            "textDelta" -> NexusTurnEvent.TextDelta(data.optString("textDelta", ""))
-            "narratorChunk" -> NexusTurnEvent.Narrator(data.optString("narratorText", ""))
+            "textDelta" -> NexusTurnEvent.TextDelta(data.optString("textDelta", ""), turnId)
+            "narratorChunk" -> NexusTurnEvent.Narrator(
+                text = data.optString("narratorText", ""),
+                narratorKind = data.optString("narratorKind", "").ifEmpty { null },
+                audible = if (data.has("audible")) data.optBoolean("audible") else null,
+                toolName = data.optString("toolName", "").ifEmpty { null },
+                turnId = turnId,
+            )
             "searchSources" -> {
                 val arr = data.optJSONArray("sources") ?: JSONArray()
                 val sources = (0 until arr.length()).mapNotNull { i ->
@@ -244,11 +259,164 @@ class NexusClient(
                         )
                     }
                 }
-                NexusTurnEvent.Sources(sources)
+                NexusTurnEvent.Sources(sources, turnId)
             }
-            "completed" -> NexusTurnEvent.Completed
-            "failed" -> NexusTurnEvent.Failed(data.optString("errorMessage", "turn failed"))
-            else -> null // audio / heartbeat / userPromptRequest — ignored for text UI
+            "audio" -> {
+                val b64 = data.optString("audioDataBase64", "")
+                val bytes = runCatching { Base64.getDecoder().decode(b64) }.getOrNull()
+                    ?: return null
+                NexusTurnEvent.Audio(
+                    opusBytes = bytes,
+                    segmentIndex = data.optInt("segmentIndex", 0),
+                    durationMs = data.optInt("durationMs", 0),
+                    isFinal = data.optBoolean("isFinal", false),
+                    turnId = turnId,
+                )
+            }
+            "completed" -> NexusTurnEvent.Completed(turnId)
+            "failed" -> NexusTurnEvent.Failed(data.optString("errorMessage", "turn failed"), turnId)
+            else -> null // heartbeat / userPromptRequest — not surfaced
+        }
+    }
+
+    // endregion
+
+    // region streaming — transcription (STT)
+
+    /**
+     * Streams mic PCM16 to `audio.sendAudioChunk` and emits transcription events.
+     *
+     * Serverpod models each chunk as its own server-stream method call correlated by `recordingId`:
+     * chunk 0 opens the whisper socket and stays open to yield the transcript; chunks >0 push bytes
+     * and return after `chunk_received`. All calls are multiplexed over ONE WebSocket (distinct
+     * `cid`s) so frame ordering is preserved — critical, since whisper needs chunk 0 first.
+     *
+     * The chunk-0 gate (mirrors `server_speech_to_text_datasource.dart`): buffer chunks >0 until
+     * chunk 0's first response arrives, then flush. When [pcm16Chunks] completes, a final
+     * `isLastChunk` request (empty payload) is sent so whisper finalizes.
+     *
+     * NOTE: unverified against a live server (server was down at authoring time); the wire shape
+     * follows the documented envelope. Verified end-to-end via [FakeNexusTransport] until then.
+     */
+    override fun streamTranscription(
+        base: String,
+        token: String,
+        recordingId: String,
+        sessionId: String,
+        pcm16Chunks: Flow<ByteArray>,
+        language: String?,
+    ): Flow<TranscriptionEvent> = callbackFlow {
+        val chunk0Cid = UUID.randomUUID().toString()
+        val wsReady = CompletableDeferred<WebSocket>()
+        val gateOpen = CompletableDeferred<Unit>()
+        var closed = false
+        var chunkCount = 0
+
+        fun request(index: Int, base64: String, isLast: Boolean): String {
+            val req = JSONObject()
+                .put("audioChunkBase64", base64)
+                .put("recordingId", recordingId)
+                .put("chunkIndex", index)
+                .put("isLastChunk", isLast)
+                .put("sessionId", sessionId)
+                .put("userMessageId", JSONObject.NULL)
+                .put("language", language ?: JSONObject.NULL)
+                .put("format", "pcm")
+            return JSONObject().put("request", req).toString()
+        }
+
+        // Each chunk >0 / EOF gets its own short-lived cid on the same socket.
+        fun sendChunk(ws: WebSocket, index: Int, bytes: ByteArray, isLast: Boolean) {
+            val cid = if (index == 0) chunk0Cid else UUID.randomUUID().toString()
+            val b64 = if (bytes.isEmpty()) "" else Base64.getEncoder().encodeToString(bytes)
+            ws.send(buildOmsc(cid, ENDPOINT_AUDIO, METHOD_SEND_AUDIO_CHUNK, request(index, b64, isLast), token).toString())
+        }
+
+        val listener = object : WebSocketListener() {
+            override fun onOpen(ws: WebSocket, response: Response) {
+                wsReady.complete(ws)
+            }
+
+            override fun onMessage(ws: WebSocket, text: String) {
+                val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
+                when (msg.optString("type")) {
+                    "ping" -> ws.send(JSONObject().put("type", "pong").put("data", JSONObject()).toString())
+                    "msm" -> {
+                        val cid = msg.optJSONObject("data")?.optString("cid")
+                        if (cid != chunk0Cid) {
+                            // A >0 / EOF chunk's `chunk_received` — nothing to surface.
+                            return
+                        }
+                        val payload = msg.optJSONObject("data")?.optJSONObject("o")?.optJSONObject("data")
+                            ?: return
+                        // First response on chunk 0 opens the gate for buffered chunks.
+                        if (!gateOpen.isCompleted) gateOpen.complete(Unit)
+                        val event = payload.optString("event")
+                        when (event) {
+                            "chunk_received", "eof_sent" -> Unit // control frames
+                            "error" -> {
+                                trySend(TranscriptionEvent("", isFinal = true, isError = true, errorMessage = payload.optString("text").ifEmpty { "transcription error" }))
+                                closed = true
+                                close()
+                            }
+                            else -> {
+                                val txt = payload.optString("text", "")
+                                val isFinal = payload.optBoolean("isFinal", false)
+                                trySend(TranscriptionEvent(txt, isFinal = isFinal))
+                                if (isFinal) {
+                                    closed = true
+                                    close()
+                                }
+                            }
+                        }
+                    }
+                    "msse", "brm" -> {
+                        trySend(TranscriptionEvent("", isFinal = true, isError = true, errorMessage = "stream error"))
+                        closed = true
+                        close()
+                    }
+                }
+            }
+
+            override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+                if (!closed) trySend(TranscriptionEvent("", isFinal = true, isError = true, errorMessage = t.message ?: "socket failure"))
+                close(t)
+            }
+        }
+
+        val request = Request.Builder().url(webSocketUrl(base)).build()
+        val ws = http.newWebSocket(request, listener)
+
+        // Feed pcm chunks: chunk 0 first, buffer the rest until the gate, then flush + stream.
+        val feeder = launch {
+            val socket = wsReady.await()
+            val buffered = ArrayList<ByteArray>()
+            var index = 0
+            pcm16Chunks
+                .onCompletion {
+                    // EOF sentinel so whisper finalizes.
+                    runCatching { sendChunk(socket, chunkCount, ByteArray(0), isLast = true) }
+                }
+                .collect { bytes ->
+                    if (index == 0) {
+                        sendChunk(socket, 0, bytes, isLast = false)
+                        chunkCount = 1
+                        index = 1
+                    } else if (!gateOpen.isCompleted) {
+                        buffered.add(bytes)
+                    } else {
+                        if (buffered.isNotEmpty()) {
+                            buffered.forEach { sendChunk(socket, chunkCount++, it, isLast = false) }
+                            buffered.clear()
+                        }
+                        sendChunk(socket, chunkCount++, bytes, isLast = false)
+                    }
+                }
+        }
+
+        awaitClose {
+            feeder.cancel()
+            runCatching { ws.cancel() }
         }
     }
 
@@ -256,9 +424,36 @@ class NexusClient(
 
     companion object {
         private const val PING_OK = "nexus-ok"
-        private const val ENDPOINT = "voiceSquad"
+        private const val ENDPOINT_VOICE = "voiceSquad"
+        private const val ENDPOINT_AUDIO = "audio"
         private const val METHOD_STREAM_TURN = "streamTurn"
+        private const val METHOD_SEND_AUDIO_CHUNK = "sendAudioChunk"
         private val JSON_MEDIA = "application/json".toMediaType()
+
+        /** Build an `omsc` (open method-stream command) frame. [args] is a JSON-encoded STRING. */
+        private fun buildOmsc(
+            cid: String,
+            endpoint: String,
+            method: String,
+            args: String,
+            token: String,
+        ): JSONObject {
+            val data = JSONObject()
+                .put("en", endpoint)
+                .put("m", method)
+                .put("cid", cid)
+                .put("args", args) // JSON-encoded STRING, not a nested object
+                .put("is", JSONArray())
+            if (token.isNotEmpty()) data.put("auth", bearer(token))
+            return JSONObject().put("type", "omsc").put("data", data)
+        }
+
+        /** Build a `cmsc` (close method-stream command) frame. */
+        private fun buildCmsc(cid: String, endpoint: String, method: String): JSONObject =
+            JSONObject().put("type", "cmsc").put(
+                "data",
+                JSONObject().put("cid", cid).put("en", endpoint).put("m", method),
+            )
 
         /**
          * Wrap the token as a Bearer value (`Bearer <token>`). Serverpod unwraps it to the raw

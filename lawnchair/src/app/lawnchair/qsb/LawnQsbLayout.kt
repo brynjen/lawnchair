@@ -20,7 +20,9 @@ import app.lawnchair.preferences.preferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.preferences2.asState
 import app.lawnchair.preferences2.firstCached
+import app.lawnchair.nexus.chat.MicGesture
 import app.lawnchair.nexus.chat.NexusChatOverlay
+import app.lawnchair.nexus.voice.MicPermission
 import app.lawnchair.qsb.providers.AppSearch
 import app.lawnchair.qsb.providers.Google
 import app.lawnchair.qsb.providers.Nexus
@@ -35,6 +37,8 @@ import com.android.launcher3.DeviceProfile
 import com.android.launcher3.views.ActivityContext
 import com.patrykmichalik.opto.core.firstBlocking
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -97,13 +101,15 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                             strokeWidth = prefs.hotseatQsbStrokeWidth.observeAsState().value,
                         )
 
+                        // Nexus mic tap-vs-hold classifier (mirrors the Flutter 250ms timer).
+                        val micClassifier = remember { NexusMicClassifier() }
                         val actions = QsbActions(
                             onQsbClick = {
                                 val launcher = context.launcher
                                 if (searchProvider == Nexus) {
-                                    // Nexus is a local provider: open the in-process chat overlay
-                                    // (or the install/configure nudge when the app isn't ready).
-                                    NexusChatOverlay.openFromQsb(launcher)
+                                    // Tap the text area → integrated text chat overlay (or a nudge
+                                    // when the Nexus app isn't installed/configured).
+                                    NexusChatOverlay.openText(launcher)
                                 } else {
                                     launcher.lifecycleScope.launch {
                                         if (prefs2.matchHotseatQsbStyle.firstCached()) {
@@ -119,9 +125,8 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                             onEndIconClick = { id ->
                                 runCatching {
                                     when {
-                                        searchProvider == Nexus && id == QsbIconId.MIC ->
-                                            // Push-to-talk not built yet — open the chat overlay.
-                                            NexusChatOverlay.openFromQsb(context.launcher)
+                                        // Nexus mic is driven by press/release below, not click.
+                                        searchProvider == Nexus && id == QsbIconId.MIC -> Unit
                                         searchProvider == Nexus && id == QsbIconId.CAMERA ->
                                             Toast.makeText(context, "Image input — coming soon", Toast.LENGTH_SHORT).show()
                                         id == QsbIconId.MIC -> voiceIntent?.let { context.startActivity(it) }
@@ -129,6 +134,16 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                                         else -> null
                                     }
                                 }
+                            },
+                            onEndIconPressDown = if (searchProvider == Nexus) {
+                                { id -> if (id == QsbIconId.MIC) micClassifier.onDown(context.launcher) }
+                            } else {
+                                null
+                            },
+                            onEndIconPressUp = if (searchProvider == Nexus) {
+                                { id, cancelled -> if (id == QsbIconId.MIC) micClassifier.onUp(context.launcher, cancelled) }
+                            } else {
+                                null
                             },
                         )
 
@@ -238,5 +253,53 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
         }
 
         fun resolveIntent(context: Context, intent: Intent): Boolean = context.packageManager.resolveActivity(intent, 0) != null
+    }
+}
+
+/**
+ * Classifies a press on the Nexus mic as tap vs hold (mirrors the Flutter 250ms `_MicPillState`):
+ *
+ *  - Held ≥ 250ms → open Voice mode in Hold, recording starts; release ([onUp]) sends.
+ *  - Released < 250ms → open Voice mode in Tap; the on-screen stop button sends.
+ *
+ * Gated on mic permission: Blocked → app settings; Denied → request, and on grant open in Tap
+ * (the finger has lifted for the system dialog, so Hold can't be honored). Runs on the main thread
+ * (pointer + lifecycleScope-Main), so its mutable fields need no synchronization.
+ */
+private class NexusMicClassifier {
+    private var timerJob: Job? = null
+    private var overlay: NexusChatOverlay? = null
+    private var resolvedHold = false
+
+    fun onDown(launcher: app.lawnchair.LawnchairLauncher) {
+        resolvedHold = false
+        overlay = null
+        when (MicPermission.state(launcher)) {
+            MicPermission.State.Granted -> {
+                timerJob = launcher.lifecycleScope.launch {
+                    delay(250)
+                    resolvedHold = true
+                    overlay = NexusChatOverlay.openVoice(launcher, MicGesture.Hold)
+                }
+            }
+            MicPermission.State.Blocked -> MicPermission.openSettings(launcher)
+            MicPermission.State.Denied -> launcher.requestMicPermission { granted ->
+                if (granted) NexusChatOverlay.openVoice(launcher, MicGesture.Tap)
+            }
+        }
+    }
+
+    fun onUp(launcher: app.lawnchair.LawnchairLauncher, cancelled: Boolean) {
+        timerJob?.cancel()
+        timerJob = null
+        if (resolvedHold) {
+            // Hold flow: releasing the mic sends the recorded utterance.
+            overlay?.endRecordingAndSend()
+        } else if (!cancelled && MicPermission.state(launcher) == MicPermission.State.Granted) {
+            // Quick tap: open in Tap mode; the stop button ends recording.
+            NexusChatOverlay.openVoice(launcher, MicGesture.Tap)
+        }
+        overlay = null
+        resolvedHold = false
     }
 }

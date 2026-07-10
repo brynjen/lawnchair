@@ -9,6 +9,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -134,6 +138,13 @@ data class QsbActions(
     val onQsbClick: () -> Unit,
     val onStartIconClick: (() -> Unit)? = null,
     val onEndIconClick: ((id: QsbIconId) -> Unit),
+    /**
+     * Optional press/release callbacks for an end icon (used by the Nexus mic to classify
+     * tap-vs-hold). When non-null for a given icon, the icon uses a raw pointer gesture instead of a
+     * plain click. [onEndIconPressUp] reports whether the gesture was cancelled (finger left the icon).
+     */
+    val onEndIconPressDown: ((id: QsbIconId) -> Unit)? = null,
+    val onEndIconPressUp: ((id: QsbIconId, cancelled: Boolean) -> Unit)? = null,
 )
 
 /**
@@ -442,6 +453,8 @@ fun LawnQsbUi(
                     icon = icon,
                     shape = shape,
                     onClick = { actions.onEndIconClick(icon.id) },
+                    onPressDown = actions.onEndIconPressDown?.let { down -> { down(icon.id) } },
+                    onPressUp = actions.onEndIconPressUp?.let { up -> { cancelled -> up(icon.id, cancelled) } },
                     modifier = Modifier.addIf(isLastVisible) {
                         offset(x = (-6).dp)
                     },
@@ -457,6 +470,9 @@ fun LawnQsbUi(
  * @param icon the state defining the icon's resource, theming, and accessibility description.
  * @param shape the shape used for clipping and the ripple indication.
  * @param onClick the callback to be invoked when the icon is clicked.
+ * @param onPressDown optional; when set (with [onPressUp]) the icon uses a raw press/release gesture
+ *   instead of a click, so the caller can classify tap-vs-hold (the Nexus mic).
+ * @param onPressUp optional release callback; `cancelled` = the finger left the icon before lifting.
  * @param modifier the [Modifier] to be applied to this icon container.
  */
 @Composable
@@ -464,16 +480,33 @@ fun QsbIcon(
     icon: QsbIconState,
     shape: Shape,
     onClick: () -> Unit,
+    onPressDown: (() -> Unit)? = null,
+    onPressUp: ((cancelled: Boolean) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val pressGesture = onPressDown != null && onPressUp != null
     Box(
         modifier = modifier
             .requiredWidth(dimensionResource(R.dimen.qsb_icon_width))
             .fillMaxHeight()
             .clip(shape)
-            .qsbClickable(
-                onClick = onClick,
-                shape = shape,
+            .then(
+                if (pressGesture) {
+                    Modifier.pointerInput(icon.id) {
+                        awaitEachGesture {
+                            // Consume down/up so the parent bar's onQsbClick (→ open text) does NOT
+                            // also fire — otherwise a mic press opens both the voice and text overlays.
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            down.consume()
+                            onPressDown!!.invoke()
+                            val up = waitForUpOrCancellation()
+                            up?.consume()
+                            onPressUp!!.invoke(up == null)
+                        }
+                    }
+                } else {
+                    Modifier.qsbClickable(onClick = onClick, shape = shape)
+                },
             )
             .padding(dimensionResource(R.dimen.qsb_icon_padding)),
         contentAlignment = Alignment.Center,

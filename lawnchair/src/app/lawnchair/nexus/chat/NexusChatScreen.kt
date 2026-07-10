@@ -1,24 +1,34 @@
 package app.lawnchair.nexus.chat
 
-import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.EaseInCubic
+import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import app.lawnchair.nexus.NexusConfig
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -27,36 +37,34 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.mutableIntStateOf
-import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusSource
-import app.lawnchair.nexus.net.NexusTurnEvent
 import app.lawnchair.nexuslauncher.NeuralOrb
 import app.lawnchair.nexuslauncher.OrbState
-import kotlin.math.exp
-import kotlin.math.max
-import kotlin.math.min
-import kotlinx.coroutines.launch
 
-// Nexus design tokens (mirrors nexus_mobile core/tokens.dart, dark palette — kept in sync with
-// NexusNewsScreen.kt).
+// Nexus design tokens (mirrors nexus_mobile core/tokens.dart, dark palette).
 private val Bg = Color(0xFF0A0A12)
 private val Surface = Color(0xFF14141E)
 private val Surface2 = Color(0xFF1C1C2A)
@@ -65,265 +73,340 @@ private val TextC = Color(0xFFF0F0F5)
 private val Text2 = Color(0x9EF0F0F5)
 private val Text3 = Color(0x61F0F0F5)
 private val Accent = Color(0xFF7AB8FF)
-private val Danger = Color(0xFFFF6B6B)
+private val Good = Color(0xFF5EEAD4)
 private val OnAccent = Color(0xFF0A1828)
+private val OnGood = Color(0xFF063A33)
 
-private data class ChatLine(val fromUser: Boolean, val text: String)
+private const val ANIM_IN_MS = 260
+private const val ANIM_OUT_MS = 220
+private const val SCRIM_ALPHA = 0.72f
 
 /**
- * Attack/decay envelope fed by streamed-token arrival: each TextDelta kicks the level up
- * (bigger deltas kick harder), and it decays at ~2.5/s between bursts — so the orb literally
- * pulses with the answer's cadence instead of a synthetic sine.
+ * The home-screen-integrated Nexus chat. Layers over the (partially dimmed) launcher: a gradient
+ * scrim that dims only the region we use, the neural orb (top-left in Text mode, centered + enlarged
+ * in Voice mode), the conversation, and mode-specific chrome. All state comes from [controller];
+ * this composable is a pure projection that forwards intents. [onClosed] runs after the exit anim.
  */
-private class TokenEnvelope {
-    private var peak = 0f
-    private var bumpedAtNanos = 0L
+@Composable
+fun NexusChatScreen(
+    controller: NexusChatController,
+    statusBarTopPx: Int,
+    onClosed: () -> Unit,
+) {
+    val state by controller.state.collectAsState()
 
-    fun bump(chars: Int) {
-        peak = max(level(), min(1f, 0.5f + chars / 40f))
-        bumpedAtNanos = System.nanoTime()
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(ANIM_IN_MS, easing = EaseOutCubic)) }
+    LaunchedEffect(state.dismissing) {
+        if (state.dismissing) {
+            appear.animateTo(0f, tween(ANIM_OUT_MS, easing = EaseInCubic))
+            onClosed()
+        }
     }
 
-    fun level(): Float {
-        if (bumpedAtNanos == 0L) return 0f
-        val age = (System.nanoTime() - bumpedAtNanos) / 1e9
-        return (peak * exp(-2.5 * age)).toFloat()
+    val orbState = orbStateFor(state.phase)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Swipe right to close (independent of the OS back-gesture config).
+            .pointerInput(Unit) {
+                var total = 0f
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        if (total > 140f) controller.dismiss()
+                        total = 0f
+                    },
+                    onDragCancel = { total = 0f },
+                ) { _, dragAmount -> total += dragAmount }
+            },
+    ) {
+        if (state.mode == Mode.Voice) {
+            VoiceLayout(state, controller, appear.value, orbState)
+        } else {
+            TextLayout(state, controller, appear.value, orbState, statusBarTopPx)
+        }
     }
 }
 
 /**
- * The Nexus assistant chat, rendered in-launcher. Types a query, opens a `streamTurn` method-stream
- * and appends the streamed answer; shows search sources when the turn returns any. The camera and
- * mic are roadmap stubs (a "coming soon" toast) — image input and push-to-talk are not wired yet.
- *
- * [serverUrl] and [token] come from the Nexus app's config provider (read by the caller before this
- * screen is shown), so the bar is only ever opened in an enabled/configured state.
+ * A vertical scrim that leaves the top of the screen clear and dims only from [fadeStart]→bottom
+ * (fractions of height), so we darken just the area the chat uses rather than the whole home screen.
  */
 @Composable
-fun NexusChatScreen(
-    serverUrl: String,
-    token: String,
-    onClose: () -> Unit,
-) {
-    val context = LocalContext.current
-    // Installed but not configured against a server yet → guide the user to finish setup instead
-    // of showing a dead composer.
-    if (serverUrl.isBlank()) {
-        NexusSetupPrompt(onClose = onClose)
-        return
-    }
-    val scope = rememberCoroutineScope()
-    val client = remember { NexusClient() }
-
-    val messages = remember { mutableStateListOf<ChatLine>() }
-    var input by remember { mutableStateOf("") }
-    var streaming by remember { mutableStateOf(false) }
-    var conversationId by remember { mutableStateOf<Int?>(null) }
-    var sources by remember { mutableStateOf<List<NexusSource>>(emptyList()) }
-    // Orb: Thinking while waiting for the first token, Speaking while text streams, Idle after;
-    // failures flick the failure counter (red flicker) and tokens feed the pulse envelope.
-    var orbState by remember { mutableStateOf(OrbState.Idle) }
-    var failureSignal by remember { mutableIntStateOf(0) }
-    val tokenEnvelope = remember { TokenEnvelope() }
-
-    val scroll = rememberScrollState()
-
-    fun send() {
-        val query = input.trim()
-        if (query.isEmpty() || streaming) return
-        input = ""
-        sources = emptyList()
-        messages.add(ChatLine(fromUser = true, text = query))
-        val answerIndex = messages.size
-        messages.add(ChatLine(fromUser = false, text = ""))
-        streaming = true
-        orbState = OrbState.Thinking
-        scope.launch {
-            val cid = conversationId
-                ?: runCatching { client.createConversation(serverUrl, token) }.getOrNull()
-            if (cid == null) {
-                messages[answerIndex] = ChatLine(false, "⚠ Couldn't reach Nexus.")
-                streaming = false
-                orbState = OrbState.Idle
-                failureSignal++
-                return@launch
-            }
-            conversationId = cid
-            runCatching {
-                client.streamTurn(
-                    base = serverUrl,
-                    token = token,
-                    conversationId = cid,
-                    onReady = {
-                        // Trigger the turn only after the stream handshake (omsr success).
-                        scope.launch {
-                            runCatching { client.submitTurn(serverUrl, token, cid, query) }
-                        }
-                    },
-                ).collect { ev ->
-                    when (ev) {
-                        is NexusTurnEvent.TextDelta -> {
-                            if (orbState != OrbState.Speaking) orbState = OrbState.Speaking
-                            tokenEnvelope.bump(ev.text.length)
-                            val cur = messages[answerIndex]
-                            messages[answerIndex] = cur.copy(text = cur.text + ev.text)
-                            scope.launch { scroll.animateScrollTo(scroll.maxValue) }
-                        }
-                        is NexusTurnEvent.Sources -> sources = ev.sources
-                        is NexusTurnEvent.Failed -> {
-                            failureSignal++
-                            val cur = messages[answerIndex]
-                            messages[answerIndex] =
-                                cur.copy(text = cur.text.ifEmpty { "⚠ ${ev.message}" })
-                        }
-                        NexusTurnEvent.Completed -> Unit
-                        is NexusTurnEvent.Narrator -> Unit // pre-roll narration — not shown in text UI
-                    }
-                }
-            }
-            streaming = false
-            orbState = OrbState.Idle // covers Completed, Failed, and stream errors alike
-        }
-    }
-
-    Column(
+private fun PartialScrim(appear: Float, fadeStart: Float, fadeEnd: Float, onTap: () -> Unit) {
+    val a = SCRIM_ALPHA * appear
+    val brush = Brush.verticalGradient(
+        0f to Color.Transparent,
+        fadeStart to Color.Transparent,
+        fadeEnd to Color.Black.copy(alpha = a),
+        1f to Color.Black.copy(alpha = a),
+    )
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Bg)
-            .windowInsetsPadding(WindowInsets.systemBars)
-            .imePadding(),
-    ) {
-        // Header: orb + title + close
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NeuralOrb(
-                modifier = Modifier.size(28.dp),
-                accent = Accent,
-                state = orbState,
-                externalAmplitude = {
-                    if (orbState == OrbState.Speaking) tokenEnvelope.level() else null
-                },
-                failureSignal = failureSignal,
-            )
-            Spacer(Modifier.width(12.dp))
-            BasicText(
-                text = "Nexus",
-                style = TextStyle(color = TextC, fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
-            )
-            Spacer(Modifier.weight(1f))
-            Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClick = onClose)
-                    .padding(8.dp),
-            ) {
-                BasicText(text = "✕", style = TextStyle(color = Text2, fontSize = 18.sp))
-            }
-        }
+            .background(brush)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onTap,
+            ),
+    )
+}
 
-        // Conversation
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(scroll)
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (messages.isEmpty()) {
-                Spacer(Modifier.height(24.dp))
-                BasicText(
-                    text = "Ask Nexus anything.",
-                    style = TextStyle(color = Text3, fontSize = 15.sp),
-                )
-            }
-            messages.forEach { line -> MessageBubble(line) }
-            if (sources.isNotEmpty()) SourcesBlock(sources)
-            Spacer(Modifier.height(12.dp))
-        }
+@Composable
+private fun BoxScope.TextLayout(
+    state: NexusChatUiState,
+    controller: NexusChatController,
+    appear: Float,
+    orbState: OrbState,
+    statusBarTopPx: Int,
+) {
+    val orbTopPadding = with(androidx.compose.ui.platform.LocalDensity.current) {
+        statusBarTopPx.toDp()
+    } + 8.dp
+    // With no messages yet, dim only a thin band just above the text field; once bubbles appear,
+    // extend the dimming up over the chat area.
+    val empty = state.messages.isEmpty()
+    PartialScrim(
+        appear,
+        fadeStart = if (empty) 0.80f else 0.12f,
+        fadeEnd = if (empty) 0.90f else 0.22f,
+        onTap = { controller.dismiss() },
+    )
 
-        // Composer
+    Column(modifier = Modifier.fillMaxSize().imePadding()) {
+        Conversation(
+            state = state,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 76.dp),
+            bottomAnchored = true, // bubbles stack directly on top of the text field
+        )
         Composer(
-            input = input,
-            onInput = { input = it },
-            onSend = ::send,
-            enabled = !streaming,
-            onCamera = {
-                Toast.makeText(context, "Image input — coming soon", Toast.LENGTH_SHORT).show()
-            },
-            onMic = {
-                // TODO(nexus): push-to-talk. Wire AudioRecord PCM16 16kHz → audio.sendAudioChunk
-                // input-stream method-stream → transcript → submitTurn (mirror the in-app
-                // voice_session_repository_impl.dart). Stubbed for now.
-                Toast.makeText(context, "Voice — coming soon", Toast.LENGTH_SHORT).show()
-            },
+            input = state.input,
+            enabled = state.phase != TurnPhase.Thinking && state.phase != TurnPhase.Speaking,
+            onInput = controller::onInput,
+            onSend = controller::send,
+            appear = appear,
+        )
+    }
+
+    // Orb: top-left, just below the status bar so it's fully tappable. Slides in from the left.
+    // The orb sits edge-to-edge on a solid-black core that fades radially out into a soft halo, so
+    // it reads clearly over the (undimmed) wallpaper without a hard-edged circle.
+    Box(
+        modifier = Modifier
+            .padding(start = 10.dp, top = orbTopPadding)
+            .size(76.dp)
+            .graphicsLayer {
+                alpha = appear
+                translationX = (appear - 1f) * 64.dp.toPx()
+            }
+            .background(
+                Brush.radialGradient(
+                    0.0f to Color.Black,
+                    0.55f to Color.Black,
+                    1.0f to Color.Transparent,
+                ),
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { controller.dismiss() },
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        // Fill the backing so the orb's sphere reads large (the composable has internal glow margin).
+        NeuralOrb(
+            modifier = Modifier.fillMaxSize(),
+            accent = Accent,
+            state = orbState,
+            externalAmplitude = controller::externalAmplitude,
+            failureSignal = state.failureSignal,
         )
     }
 }
 
 @Composable
-private fun NexusSetupPrompt(onClose: () -> Unit) {
-    val context = LocalContext.current
+private fun BoxScope.VoiceLayout(
+    state: NexusChatUiState,
+    controller: NexusChatController,
+    appear: Float,
+    orbState: OrbState,
+) {
+    // Dim only the orb-and-below region; the top of the screen stays clear.
+    PartialScrim(appear, fadeStart = 0.32f, fadeEnd = 0.48f, onTap = { controller.dismiss() })
+
+    // Orb, centred and enlarging in from the middle.
+    Box(
+        modifier = Modifier
+            .align(Alignment.Center)
+            .graphicsLayer { translationY = -40.dp.toPx() }
+            .size(260.dp)
+            .graphicsLayer {
+                alpha = appear
+                scaleX = 0.6f + 0.4f * appear
+                scaleY = 0.6f + 0.4f * appear
+            }
+            .clip(CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { controller.dismiss() },
+            ),
+    ) {
+        NeuralOrb(
+            modifier = Modifier.fillMaxSize(),
+            accent = Accent,
+            state = orbState,
+            externalAmplitude = controller::externalAmplitude,
+            failureSignal = state.failureSignal,
+        )
+    }
+
+    // Controls + transcript + conversation occupy the lower area, below the centred orb.
     Column(
         modifier = Modifier
-            .fillMaxSize()
-            .background(Bg)
-            .windowInsetsPadding(WindowInsets.systemBars),
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .fillMaxHeight(0.44f)
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
+        AnimatedVisibility(
+            visible = state.phase == TurnPhase.Listening,
+            enter = fadeIn(tween(ANIM_OUT_MS)),
+            exit = fadeOut(tween(ANIM_OUT_MS)),
+        ) {
+            StopButton(
+                label = if (state.micGesture == MicGesture.Hold) "Release to send" else "Tap to stop",
+                enabled = state.micGesture == MicGesture.Tap,
+                onClick = { controller.endRecordingAndSend() },
+            )
+        }
+        if (state.userTranscript.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            BasicText(text = state.userTranscript, style = TextStyle(color = Text2, fontSize = 16.sp))
+        }
+        Spacer(Modifier.height(12.dp))
+        Conversation(state = state, modifier = Modifier.weight(1f).fillMaxWidth())
+    }
+}
+
+@Composable
+private fun Conversation(
+    state: NexusChatUiState,
+    modifier: Modifier = Modifier,
+    bottomAnchored: Boolean = false,
+) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
+        scroll.animateScrollTo(scroll.maxValue)
+    }
+    val content: @Composable () -> Unit = {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .verticalScroll(scroll)
+                .padding(horizontal = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            NeuralOrb(modifier = Modifier.size(28.dp), accent = Accent, state = OrbState.Idle)
-            Spacer(Modifier.width(12.dp))
-            BasicText(
-                text = "Nexus",
-                style = TextStyle(color = TextC, fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
-            )
-            Spacer(Modifier.weight(1f))
-            Box(
-                modifier = Modifier.clip(CircleShape).clickable(onClick = onClose).padding(8.dp),
-            ) { BasicText(text = "✕", style = TextStyle(color = Text2, fontSize = 18.sp)) }
-        }
-        Column(
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            BasicText(
-                text = "Finish setting up Nexus",
-                style = TextStyle(color = TextC, fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
-            )
-            Spacer(Modifier.height(10.dp))
-            BasicText(
-                text = "Open the Nexus app and connect it to a server to start chatting from here.",
-                style = TextStyle(color = Text3, fontSize = 15.sp),
-            )
-            Spacer(Modifier.height(24.dp))
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Accent)
-                    .clickable {
-                        runCatching {
-                            context.packageManager.getLaunchIntentForPackage(NexusConfig.APP_PACKAGE)
-                                ?.let { context.startActivity(it) }
-                        }
-                        onClose()
-                    }
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-            ) {
-                BasicText(
-                    text = "Open Nexus",
-                    style = TextStyle(color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
-                )
+            if (state.messages.isEmpty() && state.userTranscript.isEmpty()) {
+                Spacer(Modifier.height(8.dp))
+                BasicText(text = "Ask Nexus anything.", style = TextStyle(color = Text3, fontSize = 15.sp))
             }
+            state.messages.forEach { MessageBubble(it) }
+            if (state.sources.isNotEmpty()) SourcesBlock(state.sources)
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+    if (bottomAnchored) {
+        // Content sits at the bottom (just above the composer) and grows upward; scrolls when tall.
+        Box(modifier = modifier, contentAlignment = Alignment.BottomStart) { content() }
+    } else {
+        Box(modifier = modifier) { content() }
+    }
+}
+
+@Composable
+private fun StopButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .height(56.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(Good)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 28.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        BasicText(
+            text = label,
+            style = TextStyle(color = OnGood, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+        )
+    }
+}
+
+@Composable
+private fun Composer(
+    input: String,
+    enabled: Boolean,
+    onInput: (String) -> Unit,
+    onSend: () -> Unit,
+    appear: Float,
+) {
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    // The keyboard is tied strictly to this field's presence: raise it when the composer enters
+    // (Text mode only — Voice mode has no composer), and hide it when the composer leaves.
+    DisposableEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboard?.show()
+        onDispose { keyboard?.hide() }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = appear }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(24.dp))
+                .background(Surface2)
+                .border(1.dp, BorderC, RoundedCornerShape(24.dp))
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+            if (input.isEmpty()) {
+                BasicText(text = "Message Nexus…", style = TextStyle(color = Text3, fontSize = 15.sp))
+            }
+            BasicTextField(
+                value = input,
+                onValueChange = onInput,
+                singleLine = false,
+                maxLines = 4,
+                cursorBrush = SolidColor(Accent),
+                textStyle = TextStyle(color = TextC, fontSize = 15.sp),
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(if (enabled && input.isNotBlank()) Accent else Surface)
+                .clickable(enabled = enabled) { onSend() },
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = "➤",
+                style = TextStyle(
+                    color = if (enabled && input.isNotBlank()) OnAccent else Text3,
+                    fontSize = 16.sp,
+                ),
+            )
         }
     }
 }
@@ -331,24 +414,52 @@ private fun NexusSetupPrompt(onClose: () -> Unit) {
 @Composable
 private fun MessageBubble(line: ChatLine) {
     val isUser = line.fromUser
+    val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.85f).dp
+    // Tail corner (6dp) on the sender's inner-bottom corner, mirroring the Flutter TextBubble.
+    val shape = RoundedCornerShape(
+        topStart = 18.dp,
+        topEnd = 18.dp,
+        bottomStart = if (isUser) 18.dp else 6.dp,
+        bottomEnd = if (isUser) 6.dp else 18.dp,
+    )
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(16.dp))
-                .background(if (isUser) Accent else Surface)
-                .border(1.dp, if (isUser) Color.Transparent else BorderC, RoundedCornerShape(16.dp))
-                .padding(horizontal = 14.dp, vertical = 10.dp),
+        Column(
+            modifier = Modifier.widthIn(max = maxWidth),
+            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
         ) {
-            BasicText(
-                text = line.text.ifEmpty { "…" },
-                style = TextStyle(
-                    color = if (isUser) OnAccent else TextC,
-                    fontSize = 15.sp,
-                ),
-            )
+            if (!isUser) {
+                // "● NEXUS" header above the assistant bubble.
+                Row(
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(5.dp).clip(CircleShape).background(Accent))
+                    Spacer(Modifier.width(6.dp))
+                    BasicText(
+                        text = "NEXUS",
+                        style = TextStyle(color = Accent, fontSize = 10.sp, letterSpacing = 1.4.sp),
+                    )
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .clip(shape)
+                    .background(if (isUser) Accent else Surface)
+                    .then(if (isUser) Modifier else Modifier.border(1.dp, BorderC, shape))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                BasicText(
+                    text = line.text.ifEmpty { "…" },
+                    style = TextStyle(
+                        color = if (isUser) OnAccent else TextC,
+                        fontSize = 14.5.sp,
+                        letterSpacing = (-0.1).sp,
+                    ),
+                )
+            }
         }
     }
 }
@@ -384,66 +495,9 @@ private fun SourcesBlock(sources: List<NexusSource>) {
     }
 }
 
-@Composable
-private fun Composer(
-    input: String,
-    onInput: (String) -> Unit,
-    onSend: () -> Unit,
-    enabled: Boolean,
-    onCamera: () -> Unit,
-    onMic: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(24.dp))
-                .background(Surface2)
-                .border(1.dp, BorderC, RoundedCornerShape(24.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-        ) {
-            if (input.isEmpty()) {
-                BasicText(
-                    text = "Message Nexus…",
-                    style = TextStyle(color = Text3, fontSize = 15.sp),
-                )
-            }
-            BasicTextField(
-                value = input,
-                onValueChange = onInput,
-                singleLine = false,
-                maxLines = 4,
-                cursorBrush = SolidColor(Accent),
-                textStyle = TextStyle(color = TextC, fontSize = 15.sp),
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-        IconButton(label = "📷", onClick = onCamera)
-        IconButton(label = "🎙", onClick = onMic)
-        IconButton(
-            label = "➤",
-            onClick = { if (enabled) onSend() },
-            tint = if (enabled && input.isNotBlank()) Accent else Text3,
-        )
-    }
-}
-
-@Composable
-private fun IconButton(label: String, onClick: () -> Unit, tint: Color = Text2) {
-    Box(
-        modifier = Modifier
-            .size(40.dp)
-            .clip(CircleShape)
-            .background(Surface)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        BasicText(text = label, style = TextStyle(color = tint, fontSize = 16.sp))
-    }
+private fun orbStateFor(phase: TurnPhase): OrbState = when (phase) {
+    TurnPhase.Listening -> OrbState.Listening
+    TurnPhase.Thinking -> OrbState.Thinking
+    TurnPhase.Speaking -> OrbState.Speaking
+    TurnPhase.Idle, TurnPhase.Done, TurnPhase.Failed -> OrbState.Idle
 }

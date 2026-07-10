@@ -39,6 +39,7 @@ import app.lawnchair.gestures.GestureController
 import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.gestures.ui.LawnchairShortcutActivity
+import app.lawnchair.nexus.voice.MicPermission
 import app.lawnchair.nexuslauncher.NexusNewsOverlay
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
@@ -479,6 +480,42 @@ class LawnchairLauncher : QuickstepLauncher() {
 
     override fun getDefaultOverlay(): LauncherOverlayManager = defaultOverlay
 
+    // Nexus voice: RECORD_AUDIO runtime request. The launcher has no registerForActivityResult
+    // plumbing, so use the classic requestPermissions + onRequestPermissionsResult pair.
+    private var micPermissionCallback: ((Boolean) -> Unit)? = null
+
+    /**
+     * Request RECORD_AUDIO if not already granted, invoking [callback] with the result. Granted
+     * synchronously → callback fires immediately; otherwise the system dialog shows and the callback
+     * fires from [onRequestPermissionsResult].
+     */
+    fun requestMicPermission(callback: (Boolean) -> Unit) {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            callback(true)
+            return
+        }
+        micPermissionCallback = callback
+        MicPermission.markAsked(this)
+        requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC_PERMISSION)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (requestCode == REQ_MIC_PERMISSION) {
+            val granted = grantResults.firstOrNull() ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            micPermissionCallback?.invoke(granted)
+            micPermissionCallback = null
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
     fun recreateIfNotScheduled() {
         if (sRestartFlags == 0) {
             recreate()
@@ -510,6 +547,7 @@ class LawnchairLauncher : QuickstepLauncher() {
     companion object {
         private const val FLAG_RECREATE = 1 shl 0
         private const val FLAG_RESTART = 1 shl 1
+        private const val REQ_MIC_PERMISSION = 0x4E58 // 'NX'
 
         var sRestartFlags = 0
 
