@@ -44,10 +44,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.mutableIntStateOf
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusSource
 import app.lawnchair.nexus.net.NexusTurnEvent
 import app.lawnchair.nexuslauncher.NeuralOrb
+import app.lawnchair.nexuslauncher.OrbState
+import kotlin.math.exp
+import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.launch
 
 // Nexus design tokens (mirrors nexus_mobile core/tokens.dart, dark palette — kept in sync with
@@ -64,6 +69,27 @@ private val Danger = Color(0xFFFF6B6B)
 private val OnAccent = Color(0xFF0A1828)
 
 private data class ChatLine(val fromUser: Boolean, val text: String)
+
+/**
+ * Attack/decay envelope fed by streamed-token arrival: each TextDelta kicks the level up
+ * (bigger deltas kick harder), and it decays at ~2.5/s between bursts — so the orb literally
+ * pulses with the answer's cadence instead of a synthetic sine.
+ */
+private class TokenEnvelope {
+    private var peak = 0f
+    private var bumpedAtNanos = 0L
+
+    fun bump(chars: Int) {
+        peak = max(level(), min(1f, 0.5f + chars / 40f))
+        bumpedAtNanos = System.nanoTime()
+    }
+
+    fun level(): Float {
+        if (bumpedAtNanos == 0L) return 0f
+        val age = (System.nanoTime() - bumpedAtNanos) / 1e9
+        return (peak * exp(-2.5 * age)).toFloat()
+    }
+}
 
 /**
  * The Nexus assistant chat, rendered in-launcher. Types a query, opens a `streamTurn` method-stream
@@ -94,6 +120,11 @@ fun NexusChatScreen(
     var streaming by remember { mutableStateOf(false) }
     var conversationId by remember { mutableStateOf<Int?>(null) }
     var sources by remember { mutableStateOf<List<NexusSource>>(emptyList()) }
+    // Orb: Thinking while waiting for the first token, Speaking while text streams, Idle after;
+    // failures flick the failure counter (red flicker) and tokens feed the pulse envelope.
+    var orbState by remember { mutableStateOf(OrbState.Idle) }
+    var failureSignal by remember { mutableIntStateOf(0) }
+    val tokenEnvelope = remember { TokenEnvelope() }
 
     val scroll = rememberScrollState()
 
@@ -106,12 +137,15 @@ fun NexusChatScreen(
         val answerIndex = messages.size
         messages.add(ChatLine(fromUser = false, text = ""))
         streaming = true
+        orbState = OrbState.Thinking
         scope.launch {
             val cid = conversationId
                 ?: runCatching { client.createConversation(serverUrl, token) }.getOrNull()
             if (cid == null) {
                 messages[answerIndex] = ChatLine(false, "⚠ Couldn't reach Nexus.")
                 streaming = false
+                orbState = OrbState.Idle
+                failureSignal++
                 return@launch
             }
             conversationId = cid
@@ -129,12 +163,15 @@ fun NexusChatScreen(
                 ).collect { ev ->
                     when (ev) {
                         is NexusTurnEvent.TextDelta -> {
+                            if (orbState != OrbState.Speaking) orbState = OrbState.Speaking
+                            tokenEnvelope.bump(ev.text.length)
                             val cur = messages[answerIndex]
                             messages[answerIndex] = cur.copy(text = cur.text + ev.text)
                             scope.launch { scroll.animateScrollTo(scroll.maxValue) }
                         }
                         is NexusTurnEvent.Sources -> sources = ev.sources
                         is NexusTurnEvent.Failed -> {
+                            failureSignal++
                             val cur = messages[answerIndex]
                             messages[answerIndex] =
                                 cur.copy(text = cur.text.ifEmpty { "⚠ ${ev.message}" })
@@ -145,6 +182,7 @@ fun NexusChatScreen(
                 }
             }
             streaming = false
+            orbState = OrbState.Idle // covers Completed, Failed, and stream errors alike
         }
     }
 
@@ -162,7 +200,15 @@ fun NexusChatScreen(
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NeuralOrb(modifier = Modifier.size(28.dp), accent = Accent, loading = streaming)
+            NeuralOrb(
+                modifier = Modifier.size(28.dp),
+                accent = Accent,
+                state = orbState,
+                externalAmplitude = {
+                    if (orbState == OrbState.Speaking) tokenEnvelope.level() else null
+                },
+                failureSignal = failureSignal,
+            )
             Spacer(Modifier.width(12.dp))
             BasicText(
                 text = "Nexus",
@@ -234,7 +280,7 @@ private fun NexusSetupPrompt(onClose: () -> Unit) {
                 .padding(horizontal = 20.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            NeuralOrb(modifier = Modifier.size(28.dp), accent = Accent, loading = false)
+            NeuralOrb(modifier = Modifier.size(28.dp), accent = Accent, state = OrbState.Idle)
             Spacer(Modifier.width(12.dp))
             BasicText(
                 text = "Nexus",
