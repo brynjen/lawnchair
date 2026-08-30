@@ -9,7 +9,7 @@ data class PresenceAck(
     val serverTime: String?,
     val whisperReady: Boolean,
     val ttsReady: Boolean,
-    val ollamaReady: Boolean,
+    val llmReady: Boolean,
     val allReady: Boolean,
 )
 

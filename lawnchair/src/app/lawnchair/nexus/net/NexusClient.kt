@@ -54,7 +54,7 @@ class NexusClient(
             serverTime = o.optString("serverTime", null),
             whisperReady = o.optBoolean("whisperReady", false),
             ttsReady = o.optBoolean("ttsReady", false),
-            ollamaReady = o.optBoolean("ollamaReady", false),
+            llmReady = o.optBoolean("llmReady", false),
             allReady = o.optBoolean("allReady", false),
         )
     }.getOrNull()

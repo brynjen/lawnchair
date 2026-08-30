@@ -23,7 +23,7 @@ data class NexusStatus(
     val presenceEpochMs: Long,
     val whisperReady: Boolean,
     val ttsReady: Boolean,
-    val ollamaReady: Boolean,
+    val llmReady: Boolean,
 ) {
     /** True when the bar should be interactive (installed + configured + has a URL). */
     val enabled: Boolean get() = installed && configured && serverUrl.isNotEmpty()
@@ -37,7 +37,7 @@ data class NexusStatus(
             presenceEpochMs = 0L,
             whisperReady = false,
             ttsReady = false,
-            ollamaReady = false,
+            llmReady = false,
         )
     }
 }
@@ -91,7 +91,7 @@ object NexusConfig {
                     presenceEpochMs = cursor.long("presenceEpochMs"),
                     whisperReady = cursor.bool("whisperReady"),
                     ttsReady = cursor.bool("ttsReady"),
-                    ollamaReady = cursor.bool("ollamaReady"),
+                    llmReady = cursor.bool("llmReady"),
                 )
             }
         } catch (_: SecurityException) {
