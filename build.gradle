@@ -381,6 +381,8 @@ composeCompiler {
 addFrameworkJar('framework-16.jar')
 
 dependencies {
+    // The Nexus orb (third_party/neural-orb in nexus; `melos orb:aar` publishes it).
+    implementation 'no.nordli:neural-orb-android:2.0.0'
     implementation projects.iconloaderlib
     implementation projects.searchuilib
     implementation projects.animationlib

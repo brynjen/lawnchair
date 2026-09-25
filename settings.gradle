@@ -42,6 +42,12 @@ dependencyResolutionManagement {
         }
         mavenCentral()
         maven { url 'https://jitpack.io' }
+        // The neural-orb AAR, published into nexus's third_party/neural-orb checkout
+        // (`melos orb:aar` from the nexus root).
+        maven {
+            url = file('../third_party/neural-orb/android/repository')
+            content { includeGroup('no.nordli') }
+        }
     }
 }
 
