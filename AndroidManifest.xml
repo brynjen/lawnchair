@@ -39,7 +39,7 @@
         android:fullBackupContent="@xml/backupscheme"
         android:hardwareAccelerated="true"
         android:debuggable="true"
-        android:icon="@drawable/ic_launcher_home"
+        android:icon="@mipmap/ic_nexus_app"
         android:label="@string/derived_app_name"
         android:theme="@style/AppTheme"
         android:largeHeap="@bool/config_largeHeap"
@@ -65,7 +65,6 @@
             android:enabled="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
                 <action android:name="android.intent.action.SHOW_WORK_APPS" />
                 <action android:name="android.intent.action.ALL_APPS" />
                 <category android:name="android.intent.category.HOME" />

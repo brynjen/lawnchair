@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resources for NexusAppActivity, the embedded Nexus app (carried over from nexus_mobile). -->
+<resources>
+    <color name="ic_nexus_app_background">#000000</color>
+
+    <!-- One drawer icon per APK: keep LeakCanary (debug builds) from adding its "Leaks" icon
+         next to Nexus. Leak detection and its notification still work. -->
+    <bool name="leak_canary_add_launcher_icon">false</bool>
+
+    <!-- Window theme while the Flutter UI initializes (light mode). -->
+    <style name="NexusAppLaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@drawable/nexus_app_launch_background</item>
+    </style>
+    <!-- Window behind the Flutter UI once it runs. -->
+    <style name="NexusAppNormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>

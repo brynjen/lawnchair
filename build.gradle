@@ -239,7 +239,7 @@ android {
         }
 
         debug {
-            resValue("string", "derived_app_name", "NexusLauncher")
+            resValue("string", "derived_app_name", "Nexus")
 
             manifestPlaceholders.quickstepMinSdk = "0"
             manifestPlaceholders.quickstepMaxSdk = "100000"
@@ -248,7 +248,7 @@ android {
         }
 
         release {
-            resValue("string", "derived_app_name", "NexusLauncher")
+            resValue("string", "derived_app_name", "Nexus")
             minifyEnabled true
             shrinkResources true
             pseudoLocalesEnabled false
@@ -279,7 +279,7 @@ android {
         }
 
         github {
-            applicationId 'no.nordli.nexus.launcher'
+            applicationId 'no.nordli.nexus'
             dimension "channel"
         }
 
@@ -383,6 +383,9 @@ addFrameworkJar('framework-16.jar')
 dependencies {
     // The Nexus orb (third_party/neural-orb in nexus; `melos orb:aar` publishes it).
     implementation 'no.nordli:neural-orb-android:2.0.0'
+    // The Nexus app itself (nexus_mobile as a release Flutter AAR; `melos app:aar`),
+    // hosted by app.lawnchair.nexus.NexusAppActivity — one APK for home + app.
+    implementation 'no.nordli.nexus.module:flutter_release:1.0'
     implementation projects.iconloaderlib
     implementation projects.searchuilib
     implementation projects.animationlib
@@ -540,6 +543,28 @@ licensee {
     allowUrl("https://github.com/patrykmichalik/opto/blob/master/LICENSE")
     allowUrl("https://github.com/RikkaApps/HiddenApiRefinePlugin/blob/main/LICENSE")
     allowUrl("https://opensource.org/licenses/mit-license.php")
+    // The Nexus orb (no.nordli:neural-orb-android) declares MIT by SPDX id.
+    allow(SpdxId.MIT)
+    // The embedded Nexus app (`melos app:aar`): Flutter's engine and the plugin AARs that
+    // `flutter build aar` generates carry no license metadata in their POMs. Their licenses
+    // (BSD-3-Clause / MIT / Apache-2.0) ship inside the Flutter app's own LicenseRegistry.
+    [
+        'io.flutter',
+        'io.flutter.plugins.sharedpreferences',
+        'io.flutter.plugins.urllauncher',
+        'com.baseflow.permissionhandler',
+        'com.github.dart_lang.jni',
+        'com.github.dart_lang.jni_flutter',
+        'com.lib.flutter_blue_plus',
+        'com.llfbandit.record',
+        'com.ryanheise.audio_session',
+        'com.ryanheise.just_audio',
+        'dev.fluttercommunity.plus.connectivity',
+        'no.nordli.neuralorb.flutter',
+        'no.nordli.nexus.module',
+    ].each { group ->
+        ignoreDependencies(group) { because 'Flutter add-to-app AAR without POM license metadata' }
+    }
 
     bundleAndroidAsset = true
     androidAssetReportPath = 'licenses.json'

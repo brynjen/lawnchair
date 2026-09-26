@@ -48,6 +48,13 @@ dependencyResolutionManagement {
             url = file('../third_party/neural-orb/android/repository')
             content { includeGroup('no.nordli') }
         }
+        // The Nexus app as a Flutter AAR plus its plugins' AARs (`melos app:aar`
+        // from the nexus root), and the Flutter engine artifacts they depend on.
+        maven { url = file('../nexus_mobile_module/build/host/outputs/repo') }
+        maven {
+            url = 'https://storage.googleapis.com/download.flutter.io'
+            content { includeGroup('io.flutter') }
+        }
     }
 }
 

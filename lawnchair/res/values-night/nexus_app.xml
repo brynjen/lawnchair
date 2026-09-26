@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NexusAppActivity window themes in dark mode (carried over from nexus_mobile). -->
+<resources>
+    <style name="NexusAppLaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/nexus_app_launch_background</item>
+    </style>
+    <style name="NexusAppNormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+</resources>

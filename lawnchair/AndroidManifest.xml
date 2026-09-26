@@ -22,15 +22,25 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Nexus voice: microphone capture for push-to-talk (requested at runtime on first mic use). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Read the Nexus app's config/presence via its signature-protected ContentProvider.
-         Granted only when this launcher is signed with the same key as no.nordli.nexus;
-         otherwise the read is denied and the bar shows as not-configured. -->
+    <!-- The embedded Nexus app (NexusAppActivity): Bluetooth (Android 12+ split scan/connect,
+         plus legacy fallback) and location. Plugin-declared permissions merge in from the AARs. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"
+        tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Signature-level gate on the Nexus app's config ContentProvider (NexusConfigProvider,
+         read by NexusConfig). The app is embedded in this APK now, so the reader is ourselves. -->
+    <permission
+        android:name="no.nordli.nexus.permission.READ_CONFIG"
+        android:protectionLevel="signature"/>
     <uses-permission android:name="no.nordli.nexus.permission.READ_CONFIG" />
-    <!-- So getPackageInfo("no.nordli.nexus") + the content query resolve on Android 11+. -->
-    <queries>
-        <package android:name="no.nordli.nexus" />
-        <provider android:authorities="no.nordli.nexus.config" />
-    </queries>
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -71,6 +81,33 @@
         <meta-data
             android:name="preloaded_fonts"
             android:resource="@array/preloaded_fonts" />
+
+        <!-- The Nexus app (nexus_mobile, embedded as a Flutter AAR). This is the app's drawer
+             entry; LawnchairLauncher is only the HOME activity. -->
+        <activity
+            android:name="app.lawnchair.nexus.NexusAppActivity"
+            android:exported="true"
+            android:label="Nexus"
+            android:icon="@mipmap/ic_nexus_app"
+            android:launchMode="singleTop"
+            android:theme="@style/NexusAppLaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NexusAppNormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Exposes the Nexus app's {serverUrl, configured, presence…} to NexusConfig. -->
+        <provider
+            android:name="app.lawnchair.nexus.NexusConfigProvider"
+            android:authorities="no.nordli.nexus.config"
+            android:exported="true"
+            android:readPermission="no.nordli.nexus.permission.READ_CONFIG" />
 
         <activity
             android:name="app.lawnchair.ui.preferences.PreferenceActivity"
