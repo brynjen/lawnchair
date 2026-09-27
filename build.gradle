@@ -575,6 +575,7 @@ licensee {
         'dev.fluttercommunity.plus.connectivity',
         'no.nordli.neuralorb.flutter',
         'no.nordli.nexus.module',
+        'no.nordli.nexus.notes.widgets',
     ].each { group ->
         ignoreDependencies(group) { because 'Flutter add-to-app AAR without POM license metadata' }
     }
