@@ -90,6 +90,26 @@ class NexusClient(
         )
     }
 
+    /** `POST /voiceSquad {conversationId, promptId, answer, method:"answerUserPrompt"}` → void. */
+    override suspend fun answerUserPrompt(
+        base: String,
+        token: String,
+        conversationId: Int,
+        promptId: String,
+        answer: String,
+    ) {
+        post(
+            base,
+            "/voiceSquad",
+            token,
+            JSONObject()
+                .put("conversationId", conversationId)
+                .put("promptId", promptId)
+                .put("answer", answer)
+                .put("method", "answerUserPrompt"),
+        )
+    }
+
     /** `POST /voiceSquad {conversationId, heardThroughSegmentIndex, method:"cancelTurn"}`. */
     override suspend fun cancelTurn(
         base: String,
@@ -214,6 +234,15 @@ class NexusClient(
                             sendClose(ws)
                             close()
                         }
+
+                        // The server ended our method stream (a rejected token ends it this way,
+                        // after omsr success). Without this the turn waited for the watchdog.
+                        "cmsc" -> if (!closed && msg.optJSONObject("data")?.optString("cid") == cid) {
+                            trySend(NexusTurnEvent.Failed("Nexus closed the stream."))
+                            closed = true
+                            runCatching { ws.close(1000, null) }
+                            close()
+                        }
                     }
                 }
 
@@ -224,6 +253,12 @@ class NexusClient(
 
                 override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                     ws.close(1000, null)
+                    if (!closed) {
+                        val why = listOf(code.toString(), reason).filter { it.isNotBlank() }.joinToString(" ")
+                        trySend(NexusTurnEvent.Failed("The connection to Nexus closed ($why)."))
+                        closed = true
+                    }
+                    close()
                 }
             }
 
@@ -273,9 +308,14 @@ class NexusClient(
                     turnId = turnId,
                 )
             }
+            "image" -> data.optString("imageUrl", "").ifEmpty { null }
+                ?.let { NexusTurnEvent.Image(it, turnId) }
+            "userPromptRequest" -> data.optString("promptId", "").ifEmpty { null }?.let {
+                NexusTurnEvent.UserPrompt(it, data.optString("question", ""), turnId)
+            }
             "completed" -> NexusTurnEvent.Completed(turnId)
             "failed" -> NexusTurnEvent.Failed(data.optString("errorMessage", "turn failed"), turnId)
-            else -> null // heartbeat / userPromptRequest — not surfaced
+            else -> null // heartbeat — nothing to show
         }
     }
 
@@ -482,6 +522,21 @@ class NexusClient(
             .connectTimeout(8, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.SECONDS) // streaming socket must not time out
             .pingInterval(20, TimeUnit.SECONDS)
+            // Serverpod 4's server answers OkHttp's permessage-deflate offer with a
+            // client_max_window_bits the client never offered (RFC 7692 forbids it), and OkHttp
+            // closes the socket with 1010 — every turn and transcription stream died at the
+            // handshake. The frames are small JSON; don't offer compression. An application
+            // interceptor, because OkHttp skips network interceptors on WebSocket calls.
+            .addInterceptor { chain ->
+                val request = chain.request()
+                chain.proceed(
+                    if (request.header("Upgrade").equals("websocket", ignoreCase = true)) {
+                        request.newBuilder().removeHeader("Sec-WebSocket-Extensions").build()
+                    } else {
+                        request
+                    },
+                )
+            }
             .build()
     }
 }

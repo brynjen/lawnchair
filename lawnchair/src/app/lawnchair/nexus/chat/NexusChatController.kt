@@ -1,6 +1,7 @@
 package app.lawnchair.nexus.chat
 
 import app.lawnchair.nexus.net.AudioSegment
+import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusSource
 import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.net.NexusTurnEvent
@@ -8,6 +9,7 @@ import app.lawnchair.nexus.voice.NexusAudioCapture
 import app.lawnchair.nexus.voice.NexusTtsPlayer
 import app.lawnchair.nexus.voice.TokenEnvelope
 import app.lawnchair.nexus.voice.TtsEnvelope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,13 +26,17 @@ import kotlin.math.max
 /** Which entry the overlay was opened in. */
 enum class Mode { Text, Voice }
 
-/** The per-turn lifecycle. */
-enum class TurnPhase { Idle, Listening, Thinking, Speaking, Done, Failed }
+/**
+ * The per-turn lifecycle. [AwaitingAnswer]: the model asked the user something (`ask_user`); the
+ * turn is open on the server and the next input answers it.
+ */
+enum class TurnPhase { Idle, Listening, Thinking, Speaking, AwaitingAnswer, Done, Failed }
 
 /** How voice mode was entered — drives the stop-button label (tap-to-stop vs release-to-send). */
 enum class MicGesture { None, Tap, Hold }
 
-data class ChatLine(val fromUser: Boolean, val text: String)
+/** A bubble: text, or (with [imageUrl]) a picture the assistant drew. */
+data class ChatLine(val fromUser: Boolean, val text: String, val imageUrl: String? = null)
 
 data class NexusChatUiState(
     val mode: Mode,
@@ -50,7 +56,7 @@ data class NexusChatUiState(
  * The Nexus chat/voice state machine, held by [NexusChatOverlay] outside any composition so its
  * non-Compose resources (mic capture, TTS player, OkHttp streams) survive recomposition and IME
  * relayout. The Kotlin analogue of the mobile `VoiceSessionRepositoryImpl` + bloc, reduced to the
- * launcher's needs (no clarification/ask_user; barge-in is a simple cancel-and-relisten).
+ * launcher's needs (barge-in is a simple cancel-and-relisten).
  *
  * Drives one [NexusTransport] — the real [app.lawnchair.nexus.net.NexusClient] or a fake — so it
  * works identically with the server down.
@@ -69,12 +75,22 @@ class NexusChatController(
     )
     val state: StateFlow<NexusChatUiState> = _state.asStateFlow()
 
+    /** Where an image event's path is fetched from: joined to the server, or already absolute. */
+    fun imageUrl(path: String): String =
+        if (path.startsWith("http://") || path.startsWith("https://")) path
+        else NexusClient.unaryUrl(serverUrl, path)
+
+    /** The `Authorization` header `/uploads` needs, or null without a token. */
+    val imageAuthorization: String? = token.takeIf { it.isNotEmpty() }?.let { "Bearer $it" }
+
     private val tokenEnvelope = TokenEnvelope()
     private val ttsEnvelope = TtsEnvelope()
 
     private var conversationId: Int? = null
     private var currentTurnId: String? = null
     private var answerIndex: Int = -1
+    // The `ask_user` question the open turn waits on; the next input answers it.
+    private var pendingPromptId: String? = null
 
     private var capture: NexusAudioCapture? = null
     private var ttsPlayer: NexusTtsPlayer? = null
@@ -115,7 +131,8 @@ class NexusChatController(
     fun startListening() {
         if (busy) return
         val turnId = newTurnId()
-        currentTurnId = turnId
+        // An answer continues the open turn: keep its id so the resumed reply is not dropped.
+        if (pendingPromptId == null) currentTurnId = turnId
         val recordingId = "rec-$turnId"
         val sessionId = conversationId?.toString() ?: "pending"
         _state.update { it.copy(phase = TurnPhase.Listening, userTranscript = "", errorMessage = null) }
@@ -166,11 +183,22 @@ class NexusChatController(
         _state.update { it.copy(phase = TurnPhase.Thinking) } // transcribing → thinking
     }
 
+    /** Voice mode's way to answer a question: record like a tap-to-talk turn. */
+    fun answerByVoice() {
+        if (_state.value.phase != TurnPhase.AwaitingAnswer) return
+        _state.update { it.copy(micGesture = MicGesture.Tap) }
+        startListening()
+    }
+
     // endregion
 
     // region shared turn
 
     private fun submitUserTurn(text: String) {
+        pendingPromptId?.let { promptId ->
+            answerPrompt(promptId, text)
+            return
+        }
         // Commit the user's line + an empty assistant line to stream into.
         _state.update {
             val msgs = it.messages + ChatLine(true, text) + ChatLine(false, "")
@@ -198,7 +226,14 @@ class NexusChatController(
                     conversationId = cid,
                     onReady = {
                         scope.launch {
+                            // The RPC stays open for the whole turn; only a real failure (401,
+                            // 500, no network) is news. Swallowing it left the UI on Thinking.
                             runCatching { transport.submitTurn(serverUrl, token, cid, text, turnId) }
+                                .onFailure { e ->
+                                    if (e !is CancellationException && currentTurnId == turnId) {
+                                        fail("Couldn't send to Nexus: ${e.message}")
+                                    }
+                                }
                         }
                     },
                 ).collect { ev ->
@@ -209,13 +244,33 @@ class NexusChatController(
                     onTurnEvent(ev, player)
                 }
             }
-            // Stream ended (completed / failed / socket close): let audio finish, then settle.
+            // Stream ended (completed / failed / socket close): let audio finish, then settle. A
+            // question still open went with it.
+            pendingPromptId = null
             player.markEndOfStream()
             player.awaitDrain()
             cancelWatchdog()
             if (_state.value.phase != TurnPhase.Failed) {
                 _state.update { it.copy(phase = TurnPhase.Done) }
             }
+        }
+    }
+
+    /** Send [text] as the answer to [promptId]; the open turn's reply streams in as before. */
+    private fun answerPrompt(promptId: String, text: String) {
+        pendingPromptId = null
+        val cid = conversationId ?: return fail("Couldn't reach Nexus.")
+        _state.update {
+            val msgs = it.messages + ChatLine(true, text) + ChatLine(false, "")
+            it.copy(messages = msgs, phase = TurnPhase.Thinking, userTranscript = "")
+        }
+        answerIndex = _state.value.messages.lastIndex
+        armWatchdog(TurnPhase.Thinking, 120_000, "The assistant took too long.")
+        scope.launch {
+            runCatching { transport.answerUserPrompt(serverUrl, token, cid, promptId, text) }
+                .onFailure { e ->
+                    if (e !is CancellationException) fail("Couldn't answer: ${e.message}")
+                }
         }
     }
 
@@ -230,15 +285,27 @@ class NexusChatController(
             }
             is NexusTurnEvent.Audio -> {
                 player.enqueue(AudioSegment(ev.opusBytes, ev.segmentIndex, ev.durationMs, ev.isFinal))
-                if (_state.value.phase != TurnPhase.Speaking) {
+                // The spoken question arrives after the prompt event: keep waiting for the answer.
+                val phase = _state.value.phase
+                if (phase != TurnPhase.Speaking && phase != TurnPhase.AwaitingAnswer) {
                     _state.update { it.copy(phase = TurnPhase.Speaking) }
                 }
             }
             is NexusTurnEvent.Sources -> _state.update { it.copy(sources = ev.sources) }
+            is NexusTurnEvent.Image -> _state.update {
+                it.copy(messages = it.messages + ChatLine(false, "", imageUrl = ev.url))
+            }
+            is NexusTurnEvent.UserPrompt -> {
+                // The turn waits for the answer: show the question, free the input, stop the clock.
+                pendingPromptId = ev.promptId
+                cancelWatchdog()
+                showAssistantLine(ev.question)
+                _state.update { it.copy(phase = TurnPhase.AwaitingAnswer) }
+            }
             is NexusTurnEvent.Failed -> {
+                pendingPromptId = null
                 bumpFailure()
-                // Surface the message in the assistant bubble if it's still empty.
-                setAnswerIfEmpty("⚠ ${ev.message}")
+                showAssistantLine("⚠ ${ev.message}")
                 _state.update { it.copy(phase = TurnPhase.Failed, errorMessage = ev.message) }
             }
             is NexusTurnEvent.Completed -> Unit // settled after drain
@@ -285,16 +352,24 @@ class NexusChatController(
         }
     }
 
-    private fun setAnswerIfEmpty(text: String) {
+    /**
+     * Put [text] in the current answer bubble while it is empty, otherwise in a new assistant bubble
+     * after it — a failure or a question must be visible even mid-answer.
+     */
+    private fun showAssistantLine(text: String) {
+        if (text.isEmpty()) return
         val i = answerIndex
         _state.update { s ->
-            if (i !in s.messages.indices) return@update s
-            val cur = s.messages[i]
-            if (cur.text.isNotEmpty()) return@update s
-            val msgs = s.messages.toMutableList()
-            msgs[i] = cur.copy(text = text)
-            s.copy(messages = msgs)
+            val cur = s.messages.getOrNull(i)
+            if (cur != null && !cur.fromUser && cur.imageUrl == null && cur.text.isEmpty()) {
+                val msgs = s.messages.toMutableList()
+                msgs[i] = cur.copy(text = text)
+                s.copy(messages = msgs)
+            } else {
+                s.copy(messages = s.messages + ChatLine(false, text))
+            }
         }
+        answerIndex = _state.value.messages.lastIndex
     }
 
     private fun bumpFailure() = _state.update { it.copy(failureSignal = it.failureSignal + 1) }
@@ -302,7 +377,9 @@ class NexusChatController(
     private fun fail(message: String) {
         cancelWatchdog()
         capture?.stop()
+        pendingPromptId = null
         bumpFailure()
+        showAssistantLine("⚠ $message")
         _state.update { it.copy(phase = TurnPhase.Failed, errorMessage = message) }
     }
 

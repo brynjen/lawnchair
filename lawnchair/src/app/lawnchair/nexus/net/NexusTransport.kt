@@ -22,6 +22,12 @@ interface NexusTransport {
      */
     suspend fun submitTurn(base: String, token: String, conversationId: Int, userText: String, turnId: String)
 
+    /**
+     * Answer the question an [NexusTurnEvent.UserPrompt] asked. The waiting turn resumes on the
+     * already-open [streamTurn]; no new turn starts.
+     */
+    suspend fun answerUserPrompt(base: String, token: String, conversationId: Int, promptId: String, answer: String)
+
     /** Cancel the in-flight turn (barge-in). [heardThroughSegmentIndex] = last segment the user heard. */
     suspend fun cancelTurn(base: String, token: String, conversationId: Int, heardThroughSegmentIndex: Int? = null)
 

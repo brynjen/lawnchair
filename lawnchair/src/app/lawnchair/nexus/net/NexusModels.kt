@@ -20,7 +20,7 @@ data class PresenceAck(
  * Every event carries the server's [turnId] (`turn-<micros>`) so the caller can drop events left
  * over from a barged-in/cancelled turn (the `streamTurn` socket is long-lived and survives across
  * turns, so stale events keep flowing until the server notices the cancel). `heartbeat` events are
- * still dropped in the parser; `userPromptRequest` (clarification) is out of scope for now.
+ * still dropped in the parser.
  */
 sealed interface NexusTurnEvent {
     /** The server turn this event belongs to; null on frames with no turn context. */
@@ -72,6 +72,22 @@ sealed interface NexusTurnEvent {
             return result
         }
     }
+
+    /**
+     * An image the turn drew or edited (`image_generate` / `image_edit`): a server-relative
+     * `/uploads/images/<file>` path, fetched with the access token.
+     */
+    data class Image(val url: String, override val turnId: String? = null) : NexusTurnEvent
+
+    /**
+     * The model asked the user something (`ask_user`) and waits. The turn stays open: answer with
+     * [NexusTransport.answerUserPrompt] and its reply continues under the same [turnId].
+     */
+    data class UserPrompt(
+        val promptId: String,
+        val question: String,
+        override val turnId: String? = null,
+    ) : NexusTurnEvent
 
     /** Terminal — the turn finished successfully. */
     data class Completed(override val turnId: String? = null) : NexusTurnEvent

@@ -58,9 +58,16 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import app.lawnchair.nexus.net.NexusSource
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import app.lawnchair.nexuslauncher.NeuralOrb
 import app.lawnchair.nexuslauncher.OrbState
 
@@ -178,11 +185,13 @@ private fun BoxScope.TextLayout(
     Column(modifier = Modifier.fillMaxSize().imePadding()) {
         Conversation(
             state = state,
+            controller = controller,
             modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 76.dp),
             bottomAnchored = true, // bubbles stack directly on top of the text field
         )
         Composer(
             input = state.input,
+            placeholder = if (state.phase == TurnPhase.AwaitingAnswer) "Answer Nexus…" else "Message Nexus…",
             enabled = state.phase != TurnPhase.Thinking && state.phase != TurnPhase.Speaking,
             onInput = controller::onInput,
             onSend = controller::send,
@@ -284,18 +293,23 @@ private fun BoxScope.VoiceLayout(
                 onClick = { controller.endRecordingAndSend() },
             )
         }
+        // Nexus asked something: answer it the way the turn started, by voice.
+        if (state.phase == TurnPhase.AwaitingAnswer) {
+            StopButton(label = "Tap to answer", enabled = true, onClick = { controller.answerByVoice() })
+        }
         if (state.userTranscript.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
             BasicText(text = state.userTranscript, style = TextStyle(color = Text2, fontSize = 16.sp))
         }
         Spacer(Modifier.height(12.dp))
-        Conversation(state = state, modifier = Modifier.weight(1f).fillMaxWidth())
+        Conversation(state = state, controller = controller, modifier = Modifier.weight(1f).fillMaxWidth())
     }
 }
 
 @Composable
 private fun Conversation(
     state: NexusChatUiState,
+    controller: NexusChatController,
     modifier: Modifier = Modifier,
     bottomAnchored: Boolean = false,
 ) {
@@ -315,7 +329,9 @@ private fun Conversation(
                 Spacer(Modifier.height(8.dp))
                 BasicText(text = "Ask Nexus anything.", style = TextStyle(color = Text3, fontSize = 15.sp))
             }
-            state.messages.forEach { MessageBubble(it) }
+            state.messages.forEach { line ->
+                if (line.imageUrl != null) ImageBubble(line.imageUrl, controller) else MessageBubble(line)
+            }
             if (state.sources.isNotEmpty()) SourcesBlock(state.sources)
             Spacer(Modifier.height(12.dp))
         }
@@ -349,6 +365,7 @@ private fun StopButton(label: String, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 private fun Composer(
     input: String,
+    placeholder: String,
     enabled: Boolean,
     onInput: (String) -> Unit,
     onSend: () -> Unit,
@@ -380,7 +397,7 @@ private fun Composer(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
             if (input.isEmpty()) {
-                BasicText(text = "Message Nexus…", style = TextStyle(color = Text3, fontSize = 15.sp))
+                BasicText(text = placeholder, style = TextStyle(color = Text3, fontSize = 15.sp))
             }
             BasicTextField(
                 value = input,
@@ -464,6 +481,58 @@ private fun MessageBubble(line: ChatLine) {
     }
 }
 
+/**
+ * A picture the assistant drew, fetched from the server's `/uploads` with the access token (the
+ * mobile app's `ServerImage`). Tap for full screen.
+ */
+@Composable
+private fun ImageBubble(path: String, controller: NexusChatController) {
+    val context = LocalContext.current
+    val request = remember(path) {
+        ImageRequest.Builder(context)
+            .data(controller.imageUrl(path))
+            .apply { controller.imageAuthorization?.let { addHeader("Authorization", it) } }
+            .crossfade(true)
+            .build()
+    }
+    var fullScreen by remember { mutableStateOf(false) }
+    val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.72f).dp
+    AsyncImage(
+        model = request,
+        contentDescription = "Image from Nexus",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .widthIn(max = maxWidth)
+            .height(maxWidth)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Surface2)
+            .border(1.dp, BorderC, RoundedCornerShape(16.dp))
+            .clickable { fullScreen = true },
+    )
+    if (fullScreen) {
+        // A dialog is its own window, so back closes it before it reaches the overlay.
+        Dialog(
+            onDismissRequest = { fullScreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable { fullScreen = false },
+                contentAlignment = Alignment.Center,
+            ) {
+                AsyncImage(
+                    model = request,
+                    contentDescription = "Image from Nexus",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun SourcesBlock(sources: List<NexusSource>) {
     val context = LocalContext.current
@@ -499,5 +568,5 @@ private fun orbStateFor(phase: TurnPhase): OrbState = when (phase) {
     TurnPhase.Listening -> OrbState.Listening
     TurnPhase.Thinking -> OrbState.Thinking
     TurnPhase.Speaking -> OrbState.Speaking
-    TurnPhase.Idle, TurnPhase.Done, TurnPhase.Failed -> OrbState.Idle
+    TurnPhase.Idle, TurnPhase.AwaitingAnswer, TurnPhase.Done, TurnPhase.Failed -> OrbState.Idle
 }

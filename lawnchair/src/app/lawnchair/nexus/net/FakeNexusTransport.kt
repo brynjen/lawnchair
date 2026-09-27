@@ -41,6 +41,16 @@ class FakeNexusTransport(
         Log.d(TAG, "submitTurn: \"$userText\" (turn=$turnId)")
     }
 
+    override suspend fun answerUserPrompt(
+        base: String,
+        token: String,
+        conversationId: Int,
+        promptId: String,
+        answer: String,
+    ) {
+        Log.d(TAG, "answerUserPrompt($promptId): \"$answer\"")
+    }
+
     override suspend fun cancelTurn(
         base: String,
         token: String,
