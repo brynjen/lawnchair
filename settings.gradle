@@ -30,6 +30,21 @@ develocity {
 
 rootProject.name = "lawnchair"
 
+// The neural-orb AAR comes from pub.brynje.net, at the version of neural_orb_android that the
+// nexus root resolved (`flutter pub get` there). neural_orb_android's own Gradle script finds or
+// downloads it and sets gradle.neuralOrbAndroid.{repository,version}.
+def nexusPackageConfig = file('../.dart_tool/package_config.json')
+if (!nexusPackageConfig.isFile()) {
+    throw new GradleException("No ${nexusPackageConfig}: run `flutter pub get` in the nexus root first.")
+}
+def neuralOrbAndroidPackage = new groovy.json.JsonSlurper().parse(nexusPackageConfig).packages
+        .find { it.name == 'neural_orb_android' }
+if (neuralOrbAndroidPackage == null) {
+    throw new GradleException("${nexusPackageConfig} has no neural_orb_android: run `flutter pub get` in the nexus root.")
+}
+def neuralOrbAndroidRoot = new File(nexusPackageConfig.parentFile.toURI().resolve(neuralOrbAndroidPackage.rootUri))
+apply from: new File(neuralOrbAndroidRoot, 'android/neural_orb_aar.gradle')
+
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -42,10 +57,9 @@ dependencyResolutionManagement {
         }
         mavenCentral()
         maven { url 'https://jitpack.io' }
-        // The neural-orb AAR, published into nexus's third_party/neural-orb checkout
-        // (`melos orb:aar` from the nexus root).
+        // The neural-orb AAR (see gradle.neuralOrbAndroid above).
         maven {
-            url = file('../third_party/neural-orb/android/repository')
+            url = gradle.neuralOrbAndroid.repository
             content { includeGroup('no.nordli') }
         }
         // The Nexus app as a Flutter AAR plus its plugins' AARs (`melos app:aar`

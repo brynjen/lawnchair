@@ -381,8 +381,8 @@ composeCompiler {
 addFrameworkJar('framework-16.jar')
 
 dependencies {
-    // The Nexus orb (third_party/neural-orb in nexus; `melos orb:aar` publishes it).
-    implementation 'no.nordli:neural-orb-android:2.0.0'
+    // The Nexus orb, at the neural_orb_android version nexus resolved (settings.gradle).
+    implementation "no.nordli:neural-orb-android:${gradle.neuralOrbAndroid.version}"
     // The Nexus app itself (nexus_mobile as a release Flutter AAR; `melos app:aar`),
     // hosted by app.lawnchair.nexus.NexusAppActivity — one APK for home + app.
     implementation 'no.nordli.nexus.module:flutter_release:1.0'
