@@ -568,7 +568,7 @@ licensee {
         'com.baseflow.permissionhandler',
         'com.github.dart_lang.jni',
         'com.github.dart_lang.jni_flutter',
-        'com.lib.flutter_blue_plus',
+        'com.jmx.flutter_blue_plus',
         'com.llfbandit.record',
         'com.ryanheise.audio_session',
         'com.ryanheise.just_audio',
