@@ -574,6 +574,7 @@ licensee {
         'com.ryanheise.just_audio',
         'dev.fluttercommunity.plus.connectivity',
         'no.nordli.neuralorb.flutter',
+        'no.nordli.nexus.health.sync',
         'no.nordli.nexus.module',
         'no.nordli.nexus.notes.widgets',
     ].each { group ->

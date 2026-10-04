@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12 and later (backupscheme.xml is the Android 11 and earlier list). The embedded
+  Nexus app's health_sync keeps the bearer token for /coach/** (nexus_health_sync_config) and
+  the Health Connect changes tokens (nexus_health_sync_state) in private SharedPreferences.
+  Neither may reach Google's cloud backup or another phone: the token is a credential, and
+  the changes tokens only mean something to this phone's Health Connect.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="nexus_health_sync_config.xml" />
+        <exclude domain="sharedpref" path="nexus_health_sync_state.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="nexus_health_sync_config.xml" />
+        <exclude domain="sharedpref" path="nexus_health_sync_state.xml" />
+    </device-transfer>
+</data-extraction-rules>
