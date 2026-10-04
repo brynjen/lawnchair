@@ -237,6 +237,7 @@ private fun ListScreen(
                     contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    item(key = "eir") { EirCard() }
                     items(filtered, key = { it.id }) { NewsCard(it, query) { onOpen(it) } }
                 }
             }
