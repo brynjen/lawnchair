@@ -399,6 +399,10 @@ dependencies {
     // The Nexus app itself (nexus_mobile as a release Flutter AAR; `melos app:aar`),
     // hosted by app.lawnchair.nexus.NexusAppActivity — one APK for home + app.
     implementation 'no.nordli.nexus.module:flutter_release:1.0'
+    // WorkManager, for the embedded app's health_sync worker. This manifest removes androidx.startup's
+    // InitializationProvider (the Launcher3 comment: eager Jetpack init), so nothing initialises
+    // WorkManager but LawnchairApp's Configuration.Provider, which it does on first use.
+    implementation 'androidx.work:work-runtime:2.11.2'
     implementation projects.iconloaderlib
     implementation projects.searchuilib
     implementation projects.animationlib

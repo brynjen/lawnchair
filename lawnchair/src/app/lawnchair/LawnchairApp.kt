@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.work.Configuration
 import app.lawnchair.backup.LawnchairBackup
 import app.lawnchair.flowerpot.Flowerpot
 import app.lawnchair.preferences.PreferenceManager
@@ -56,7 +57,15 @@ import com.android.quickstep.RecentsActivity
 import com.android.systemui.shared.system.QuickStepContract
 import java.io.File
 
-class LawnchairApp : LauncherApplication() {
+class LawnchairApp :
+    LauncherApplication(),
+    Configuration.Provider {
+    /**
+     * WorkManager, started on first use: the manifest removes androidx.startup's InitializationProvider, which
+     * is what would otherwise start it. The embedded Nexus app's health_sync schedules its sync worker.
+     */
+    override val workManagerConfiguration: Configuration = Configuration.Builder().build()
+
     private val compatible = Build.VERSION.SDK_INT in BuildConfig.QUICKSTEP_MIN_SDK..BuildConfig.QUICKSTEP_MAX_SDK
     private val isRecentsComponent: Boolean by unsafeLazy { checkRecentsComponent() }
     private val recentsEnabled: Boolean get() = compatible && isRecentsComponent
