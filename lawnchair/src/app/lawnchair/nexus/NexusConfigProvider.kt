@@ -34,6 +34,11 @@ class NexusConfigProvider : ContentProvider() {
         const val KEY_TTS_READY = "flutter.nexus.presence.ttsReady"
         const val KEY_LLM_READY = "flutter.nexus.presence.llmReady"
 
+        // Speech put away on purpose (the server's GPU Max mode). Inverted so an app that never wrote
+        // the key reads as "voice on": an absent key is false.
+        const val KEY_VOICE_OFF = "flutter.nexus.presence.voiceOff"
+        const val KEY_VOICE_OFF_REASON = "flutter.nexus.presence.voiceOffReason"
+
         // Cursor column names (the contract the launcher consumes).
         val COLUMNS = arrayOf(
             "serverUrl",
@@ -43,6 +48,8 @@ class NexusConfigProvider : ContentProvider() {
             "whisperReady",
             "ttsReady",
             "llmReady",
+            "voiceOff",
+            "voiceOffReason",
         )
     }
 
@@ -67,6 +74,8 @@ class NexusConfigProvider : ContentProvider() {
                 boolToInt(readBool(prefs, KEY_WHISPER_READY)),
                 boolToInt(readBool(prefs, KEY_TTS_READY)),
                 boolToInt(readBool(prefs, KEY_LLM_READY)),
+                boolToInt(readBool(prefs, KEY_VOICE_OFF)),
+                prefs.getString(KEY_VOICE_OFF_REASON, "") ?: "",
             ),
         )
         return cursor

@@ -24,6 +24,10 @@ data class NexusStatus(
     val whisperReady: Boolean,
     val ttsReady: Boolean,
     val llmReady: Boolean,
+    /** The server has speech in and out off (its GPU Max mode); typing still works. */
+    val voiceOff: Boolean = false,
+    /** The server's sentence for [voiceOff]; blank when it gave none. */
+    val voiceOffReason: String = "",
 ) {
     /** True when the bar should be interactive (installed + configured + has a URL). */
     val enabled: Boolean get() = installed && configured && serverUrl.isNotEmpty()
@@ -92,6 +96,8 @@ object NexusConfig {
                     whisperReady = cursor.bool("whisperReady"),
                     ttsReady = cursor.bool("ttsReady"),
                     llmReady = cursor.bool("llmReady"),
+                    voiceOff = cursor.bool("voiceOff"),
+                    voiceOffReason = cursor.string("voiceOffReason"),
                 )
             }
         } catch (_: SecurityException) {

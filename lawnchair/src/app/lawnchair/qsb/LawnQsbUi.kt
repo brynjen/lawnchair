@@ -194,12 +194,15 @@ fun rememberHotseatQsbState(
     themed: Boolean,
     showMic: Boolean,
     showLens: Boolean,
+    // The Nexus server has speech off (its GPU Max mode): the Nexus bar then has no mic at all, and
+    // the bar itself, which opens the text overlay, is the one way in.
+    nexusVoiceOff: Boolean = false,
 ): QsbState {
     val searchLabel = stringResource(R.string.label_search)
     val voiceSearchLabel = stringResource(R.string.label_voice_search)
     val lensLabel = stringResource(R.string.label_lens)
 
-    return remember(searchProvider, themed, showMic, showLens, searchLabel, voiceSearchLabel, lensLabel) {
+    return remember(searchProvider, themed, showMic, showLens, nexusVoiceOff, searchLabel, voiceSearchLabel, lensLabel) {
         // Nexus chat bar: full-colour Nexus glyph on the left; a disabled camera (image input is a
         // roadmap stub) and an active mic (push-to-talk) on the right. Tapping the bar opens the
         // chat overlay (wired in LawnQsbLayout), not an app/provider launch.
@@ -229,7 +232,7 @@ fun rememberHotseatQsbState(
                         themed = true,
                         method = ThemingMethod.TINT,
                         contentDescription = voiceSearchLabel,
-                        visible = true,
+                        visible = !nexusVoiceOff,
                     ),
                 ),
             )

@@ -149,6 +149,20 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
          */
         fun openVoice(launcher: LawnchairLauncher, gesture: MicGesture): NexusChatOverlay? {
             val (url, token) = resolveOrNudge(launcher) ?: return null
+            // The server has put speech away (its GPU Max mode): say why instead of opening a
+            // voice overlay that cannot hear or answer. Typing (openText) is unaffected. This is
+            // the one entry for the hold, the tap and the permission-grant paths alike.
+            if (!(USE_MOCK || simulate)) {
+                val status = NexusConfig.read(launcher)
+                if (status.voiceOff) {
+                    Toast.makeText(
+                        launcher,
+                        status.voiceOffReason.ifBlank { "Voice is off right now. Tap to type." },
+                        Toast.LENGTH_LONG,
+                    ).show()
+                    return null
+                }
+            }
             return NexusChatOverlay(launcher).also { it.show(Mode.Voice, url, token, gesture) }
         }
 

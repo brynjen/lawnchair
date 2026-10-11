@@ -7,6 +7,7 @@ import android.content.Intent
 import android.util.AttributeSet
 import android.widget.FrameLayout
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
@@ -20,6 +21,7 @@ import app.lawnchair.preferences.preferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.preferences2.asState
 import app.lawnchair.preferences2.firstCached
+import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.chat.MicGesture
 import app.lawnchair.nexus.chat.NexusChatOverlay
 import app.lawnchair.nexus.voice.MicPermission
@@ -36,6 +38,7 @@ import com.android.launcher3.BaseActivity
 import com.android.launcher3.DeviceProfile
 import com.android.launcher3.views.ActivityContext
 import com.patrykmichalik.opto.core.firstBlocking
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,6 +46,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(context, attrs) {
 
@@ -83,11 +87,22 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                             if (supportsLens) getLensIntent(context) else null
                         }
 
+                        // The Nexus server's speech being off (its GPU Max mode) is read from the app's
+                        // presence cache, which changes while this bar is up, so it is read again.
+                        val nexusVoiceOff by produceState(false, searchProvider) {
+                            if (searchProvider != Nexus) return@produceState
+                            while (true) {
+                                value = withContext(Dispatchers.IO) { NexusConfig.read(context).voiceOff }
+                                delay(VOICE_OFF_POLL_MS)
+                            }
+                        }
+
                         val state = rememberHotseatQsbState(
                             searchProvider = searchProvider,
                             themed = themed,
                             showMic = voiceIntent != null,
                             showLens = lensIntent != null,
+                            nexusVoiceOff = nexusVoiceOff,
                         )
 
                         val style = buildQsbStyle(
@@ -255,6 +270,9 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
         fun resolveIntent(context: Context, intent: Intent): Boolean = context.packageManager.resolveActivity(intent, 0) != null
     }
 }
+
+/** How often the Nexus bar reads whether the server has speech off (the app's presence cache changes under it). */
+private const val VOICE_OFF_POLL_MS = 5_000L
 
 /**
  * Classifies a press on the Nexus mic as tap vs hold (mirrors the Flutter 250ms `_MicPillState`):
