@@ -9,6 +9,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.nexus.NexusConfig
+import app.lawnchair.nexus.NexusLockNudge
 import app.lawnchair.nexus.net.FakeNexusTransport
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusTransport
@@ -167,31 +168,18 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
         }
 
         /**
-         * Resolve (serverUrl, token) from the Nexus config, or nudge the user and return null. In
-         * simulate mode the config gating is bypassed with a mock URL.
+         * Resolve (serverUrl, session key) from the Nexus app, or nudge the user and return null.
+         * Nothing here talks to the server for a phone with nobody signed in: each missing step
+         * ([NexusLock]) says what to do, and the app opens where there is something to do in it. In
+         * simulate mode the gating is bypassed with a mock URL.
          */
         private fun resolveOrNudge(launcher: LawnchairLauncher): Pair<String, String>? {
             // In mock mode, skip the install/configure gating entirely so the overlay always opens.
             if (USE_MOCK || simulate) return MOCK_URL to ""
             val status = NexusConfig.read(launcher)
-            if (!status.installed) {
-                Toast.makeText(
-                    launcher,
-                    launcher.getString(com.android.launcher3.R.string.nexus_install_prompt),
-                    Toast.LENGTH_LONG,
-                ).show()
-                return null
-            }
-            if (status.serverUrl.isBlank()) {
-                // Installed but not configured — send the user to finish setup in the Nexus app.
-                Toast.makeText(launcher, "Open Nexus to finish setup.", Toast.LENGTH_LONG).show()
-                runCatching {
-                    launcher.packageManager.getLaunchIntentForPackage(NexusConfig.APP_PACKAGE)
-                        ?.let { launcher.startActivity(it) }
-                }
-                return null
-            }
-            return status.serverUrl to NexusConfig.accessToken
+            if (status.enabled) return status.serverUrl to status.authKey
+            NexusLockNudge.show(launcher, status.lock)
+            return null
         }
     }
 }

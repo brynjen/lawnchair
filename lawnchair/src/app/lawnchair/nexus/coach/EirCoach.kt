@@ -38,7 +38,7 @@ object EirCoach {
         val status = NexusConfig.read(context)
         if (!status.enabled) return@withContext null
         try {
-            val client = CoachClient(status.serverUrl, NexusConfig.accessToken, sealKey)
+            val client = CoachClient(status.serverUrl, status.authKey, sealKey)
             val day = """{"day":"${LocalDate.now()}"}""".toByteArray()
             val today = client.post("today", day)
             val pending = client.post("checkins/pending", "{}".toByteArray())

@@ -5,6 +5,7 @@ import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusSource
 import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.net.NexusTurnEvent
+import app.lawnchair.nexus.net.NexusUnauthorizedException
 import app.lawnchair.nexus.voice.NexusAudioCapture
 import app.lawnchair.nexus.voice.NexusTtsPlayer
 import app.lawnchair.nexus.voice.TokenEnvelope
@@ -231,7 +232,7 @@ class NexusChatController(
                             runCatching { transport.submitTurn(serverUrl, token, cid, text, turnId) }
                                 .onFailure { e ->
                                     if (e !is CancellationException && currentTurnId == turnId) {
-                                        fail("Couldn't send to Nexus: ${e.message}")
+                                        fail(describe(e, "Couldn't send to Nexus"))
                                     }
                                 }
                         }
@@ -269,7 +270,7 @@ class NexusChatController(
         scope.launch {
             runCatching { transport.answerUserPrompt(serverUrl, token, cid, promptId, text) }
                 .onFailure { e ->
-                    if (e !is CancellationException) fail("Couldn't answer: ${e.message}")
+                    if (e !is CancellationException) fail(describe(e, "Couldn't answer"))
                 }
         }
     }
@@ -373,6 +374,14 @@ class NexusChatController(
     }
 
     private fun bumpFailure() = _state.update { it.copy(failureSignal = it.failureSignal + 1) }
+
+    /** The sentence for a failed call: a refused session key says to sign in again. */
+    private fun describe(e: Throwable, what: String): String =
+        if (e is NexusUnauthorizedException) {
+            "Your Nexus session has ended. Open Nexus to sign in again."
+        } else {
+            "$what: ${e.message}"
+        }
 
     private fun fail(message: String) {
         cancelWatchdog()

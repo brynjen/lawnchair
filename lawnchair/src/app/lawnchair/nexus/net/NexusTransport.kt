@@ -7,8 +7,9 @@ import kotlinx.coroutines.flow.Flow
  * implementation ([FakeNexusTransport]) stand in for the real [NexusClient] while the server is
  * unreachable, without the controller knowing the difference.
  *
- * [base] and [token] are threaded through every call so a single transport instance can serve any
- * server (the real client is stateless; the fake ignores them).
+ * [base] and [token] (the signed-in person's session key) are threaded through every call so a
+ * single transport instance can serve any server (the real client is stateless; the fake ignores
+ * them).
  */
 interface NexusTransport {
 
@@ -57,3 +58,10 @@ interface NexusTransport {
         language: String? = null,
     ): Flow<TranscriptionEvent>
 }
+
+/**
+ * The server refused the session key (HTTP 401): the person was signed out there, or the key was
+ * revoked. Distinct from a network failure so the chat can say to sign in again rather than
+ * "couldn't reach Nexus".
+ */
+class NexusUnauthorizedException : java.io.IOException("HTTP 401: the session is no longer valid")

@@ -4,16 +4,39 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
-import com.android.launcher3.BuildConfig
+
+/**
+ * Why the Nexus bar, voice, News, the Eir card and the widgets are (not) usable. The launcher
+ * does nothing for the person until the app has a server, a signed-in person and finished
+ * onboarding for that person; each lock names the step that is missing.
+ */
+enum class NexusLock {
+    /** Everything the launcher needs is there. */
+    None,
+
+    /** The Nexus app is not on the phone. */
+    NotInstalled,
+
+    /** Installed, but it has never reached a server. */
+    NeedsServer,
+
+    /** A server, but nobody is signed in (or the app holds no session key). */
+    NeedsSignIn,
+
+    /** Signed in, but this person has not finished onboarding. */
+    NeedsOnboarding,
+}
 
 /**
  * Reconciled snapshot of the Nexus app's config + cached presence, read from the app's
  * signature-protected ContentProvider (`content://no.nordli.nexus.config`). The launcher never
- * stores its own server URL — this is the single source of truth.
+ * stores its own server URL or login — the app is the single source of truth.
  *
- * [enabled] gates the chat bar: it requires the app installed, onboarding-configured, and a
- * non-empty server URL. When the provider is unreachable (app not installed, or a debug
- * signature mismatch denies the read) every flag falls back to "not configured".
+ * [enabled] gates the chat bar and everything else that talks to the server: it requires the app
+ * installed, a server, a signed-in person with a session key ([authKey]) and that person's
+ * onboarding finished ([lock] says which is missing). When the provider is unreachable (app not
+ * installed, or a debug signature mismatch denies the read) every flag falls back to "not
+ * configured".
  */
 data class NexusStatus(
     val installed: Boolean,
@@ -28,9 +51,25 @@ data class NexusStatus(
     val voiceOff: Boolean = false,
     /** The server's sentence for [voiceOff]; blank when it gave none. */
     val voiceOffReason: String = "",
+    /** A person is signed in on the app (and the app holds their session key). */
+    val signedIn: Boolean = false,
+    /** That person has finished onboarding. */
+    val onboarded: Boolean = false,
+    /** The signed-in person's session key, which every call to the server carries; blank when out. */
+    val authKey: String = "",
 ) {
-    /** True when the bar should be interactive (installed + configured + has a URL). */
-    val enabled: Boolean get() = installed && configured && serverUrl.isNotEmpty()
+    /** The first thing missing, or [NexusLock.None]. A flag without a key does not count as signed in. */
+    val lock: NexusLock
+        get() = when {
+            !installed -> NexusLock.NotInstalled
+            !configured || serverUrl.isEmpty() -> NexusLock.NeedsServer
+            !signedIn || authKey.isEmpty() -> NexusLock.NeedsSignIn
+            !onboarded -> NexusLock.NeedsOnboarding
+            else -> NexusLock.None
+        }
+
+    /** True when the bar should be interactive and the launcher may call the server. */
+    val enabled: Boolean get() = lock == NexusLock.None
 
     companion object {
         val NOT_INSTALLED = NexusStatus(
@@ -53,9 +92,6 @@ object NexusConfig {
 
     /** Presence cache is treated as stale (needs a fresh ping) after this long. */
     const val PRESENCE_STALE_MS = 60_000L
-
-    /** The interim shared access token compiled into the app. */
-    val accessToken: String get() = BuildConfig.NEXUS_ACCESS_TOKEN
 
     /** Whether the Nexus app is installed at all. */
     fun isAppInstalled(context: Context): Boolean = try {
@@ -87,6 +123,7 @@ object NexusConfig {
                 NexusStatus.NOT_INSTALLED.copy(installed = true, serverUrl = overrideUrl)
             } else {
                 val providerUrl = cursor.string("serverUrl")
+                val authKey = cursor.string("authKey")
                 NexusStatus(
                     installed = true,
                     configured = cursor.bool("configured"),
@@ -98,6 +135,11 @@ object NexusConfig {
                     llmReady = cursor.bool("llmReady"),
                     voiceOff = cursor.bool("voiceOff"),
                     voiceOffReason = cursor.string("voiceOffReason"),
+                    authKey = authKey,
+                    // The key decides, not the flag: a phone restored from a backup can carry the
+                    // flag without the key (the key's file is kept out of backups).
+                    signedIn = cursor.bool("signedIn") && authKey.isNotEmpty(),
+                    onboarded = cursor.bool("onboarded"),
                 )
             }
         } catch (_: SecurityException) {

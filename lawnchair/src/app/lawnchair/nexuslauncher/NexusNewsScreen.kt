@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -63,6 +64,8 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lawnchair.nexus.NexusConfig
+import app.lawnchair.nexus.NexusLock
+import app.lawnchair.nexus.NexusLockNudge
 import app.lawnchair.nexus.net.NexusClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -153,6 +156,15 @@ fun NexusNewsScreen(onClose: () -> Unit) {
     var selected by remember { mutableStateOf<NexusArticle?>(null) }
     var loading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    // Whether the Nexus app is signed in and set up, re-read while the panel is open: signing in
+    // lets the news in without closing it. Until then nothing of the news shows.
+    val lock by produceState(NexusLock.NeedsSignIn) {
+        while (true) {
+            value = withContext(Dispatchers.IO) { NexusConfig.read(context).lock }
+            delay(2_000)
+        }
+    }
 
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -165,7 +177,9 @@ fun NexusNewsScreen(onClose: () -> Unit) {
     ) {
         Box(Modifier.fillMaxSize().background(Bg)) {
             val article = selected
-            if (article != null) {
+            if (lock != NexusLock.None) {
+                LockedScreen(lock, onClose)
+            } else if (article != null) {
                 DetailsScreen(article, onBack = { selected = null })
             } else {
                 ListScreen(
@@ -183,6 +197,52 @@ fun NexusNewsScreen(onClose: () -> Unit) {
                     },
                     onOpen = { selected = it },
                     onClose = onClose,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The panel for a phone whose Nexus app is not ready (no server, nobody signed in, onboarding
+ * unfinished): the mock articles stay hidden and the one thing to do is said, with a way into the
+ * app where that step is.
+ */
+@Composable
+private fun LockedScreen(lock: NexusLock, onClose: () -> Unit) {
+    val context = LocalContext.current
+    Column(
+        Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.systemBars)
+            .swipeToDismiss(toRight = false, onDismiss = onClose)
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        NeuralOrb(modifier = Modifier.size(112.dp), loading = false)
+        Spacer(Modifier.height(24.dp))
+        Text(
+            "Nexus News",
+            style = TextStyle(color = TextC, fontSize = 18.sp, fontWeight = FontWeight.Medium),
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            NexusLockNudge.message(context, lock),
+            style = TextStyle(color = Text3, fontSize = 15.sp),
+        )
+        if (lock != NexusLock.NotInstalled) {
+            Spacer(Modifier.height(24.dp))
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Accent)
+                    .clickable { NexusLockNudge.openApp(context) }
+                    .padding(24.dp, 12.dp),
+            ) {
+                Text(
+                    "Open Nexus",
+                    style = TextStyle(color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.Medium),
                 )
             }
         }
@@ -259,7 +319,7 @@ private fun Header(loading: Boolean) {
         while (true) {
             val status = withContext(Dispatchers.IO) { NexusConfig.read(context) }
             online = if (status.enabled) {
-                withContext(Dispatchers.IO) { client.ping(status.serverUrl, NexusConfig.accessToken) }
+                withContext(Dispatchers.IO) { client.ping(status.serverUrl, status.authKey) }
             } else {
                 null
             }

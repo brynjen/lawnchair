@@ -18,12 +18,22 @@ import android.net.Uri
  *
  * The values are the Flutter app's SharedPreferences, which shared_preferences
  * stores in the file `FlutterSharedPreferences` with every key prefixed
- * `flutter.`.
+ * `flutter.` — except the login, which lives in a file of its own, `nexus_auth`
+ * (keys `signedIn`, `onboarded`, `authKey`, no prefix): the session key is a
+ * credential, and that file is kept out of backups (`data_extraction_rules.xml`),
+ * which `FlutterSharedPreferences` is not.
  */
 class NexusConfigProvider : ContentProvider() {
 
     private companion object {
         const val PREFS_FILE = "FlutterSharedPreferences"
+
+        // The login the app writes when a person signs in or out (nexus_mobile
+        // launcher_gate.dart). Unprefixed keys: it is written with the async API.
+        const val AUTH_PREFS_FILE = "nexus_auth"
+        const val KEY_SIGNED_IN = "signedIn"
+        const val KEY_ONBOARDED = "onboarded"
+        const val KEY_AUTH_KEY = "authKey"
 
         // Native (flutter.-prefixed) keys written by the Dart side.
         const val KEY_SERVER_URL = "flutter.nexus.server.url"
@@ -50,6 +60,9 @@ class NexusConfigProvider : ContentProvider() {
             "llmReady",
             "voiceOff",
             "voiceOffReason",
+            "signedIn",
+            "onboarded",
+            "authKey",
         )
     }
 
@@ -63,6 +76,7 @@ class NexusConfigProvider : ContentProvider() {
         sortOrder: String?,
     ): Cursor {
         val prefs = context!!.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
+        val auth = context!!.getSharedPreferences(AUTH_PREFS_FILE, Context.MODE_PRIVATE)
 
         val cursor = MatrixCursor(COLUMNS)
         cursor.addRow(
@@ -76,6 +90,9 @@ class NexusConfigProvider : ContentProvider() {
                 boolToInt(readBool(prefs, KEY_LLM_READY)),
                 boolToInt(readBool(prefs, KEY_VOICE_OFF)),
                 prefs.getString(KEY_VOICE_OFF_REASON, "") ?: "",
+                boolToInt(readBool(auth, KEY_SIGNED_IN)),
+                boolToInt(readBool(auth, KEY_ONBOARDED)),
+                auth.getString(KEY_AUTH_KEY, "") ?: "",
             ),
         )
         return cursor

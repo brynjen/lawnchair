@@ -30,8 +30,9 @@ import org.json.JSONObject
  * transcription are method-stream WebSockets. See `docs/nexus-search-bar-plan.md` for the confirmed
  * wire facts.
  *
- * All calls carry the interim shared access token: unary as the `Authorization` header, the
- * WebSocket in the `omsc` `auth` field. An empty token is omitted.
+ * All calls carry the signed-in person's session key: unary as the `Authorization` header, the
+ * WebSocket in the `omsc` `auth` field. An empty key is omitted. A 401 on a unary call is a
+ * [NexusUnauthorizedException].
  */
 class NexusClient(
     private val http: OkHttpClient = defaultHttpClient(),
@@ -155,7 +156,9 @@ class NexusClient(
                 response.use {
                     if (!cont.isActive) return
                     val text = it.body?.string().orEmpty()
-                    if (!it.isSuccessful) {
+                    if (it.code == 401) {
+                        cont.resumeWithException(NexusUnauthorizedException())
+                    } else if (!it.isSuccessful) {
                         cont.resumeWithException(
                             java.io.IOException("HTTP ${it.code} for $endpoint: $text"),
                         )
@@ -496,8 +499,8 @@ class NexusClient(
             )
 
         /**
-         * Wrap the token as a Bearer value (`Bearer <token>`). Serverpod unwraps it to the raw
-         * token; the gate compares that to NEXUS_ACCESS_TOKEN. Bearer (not Basic) because with
+         * Wrap the key as a Bearer value (`Bearer <key>`). Serverpod unwraps it to the raw
+         * key and checks it against the person's session. Bearer (not Basic) because with
          * `validateHeaders` on (the default) both the HTTP (Relic typed parser) and the WS
          * (isValidAuthHeaderValue) paths require a valid scheme, and a `Basic` value whose base64
          * isn't `user:pass` is rejected ("Invalid basic token format" → 400).

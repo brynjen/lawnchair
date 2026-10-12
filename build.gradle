@@ -159,33 +159,16 @@ android {
         buildConfigField "String", "COMMIT_HASH", "\"${buildCommit}\""
         buildConfigField "boolean", "ENABLE_AUTO_INSTALLS_LAYOUT", "false"
 
-        // Nexus interim shared access-token gate. The real secret is NEVER committed — it is read
-        // at build time from (in order) the NEXUS_ACCESS_TOKEN env var, the gitignored
-        // local.properties, a Gradle property, or the embedded app's gitignored
-        // ../nexus_mobile/.env.prod, falling back to the public placeholder. Sent as
-        // the Authorization header on unary calls and the omsc auth field on the streaming
-        // WebSocket. Replaced by Supabase auth later.
+        // Local build inputs for the Nexus bits below. The person's login is not one of them: the
+        // embedded app owns it, and the launcher reads the session key from the app at run time
+        // (NexusConfigProvider), so no access token is compiled into this APK.
         def nexusLocalProps = new Properties()
         def nexusLocalPropsFile = rootProject.file("local.properties")
         if (nexusLocalPropsFile.exists()) {
             nexusLocalPropsFile.withInputStream { nexusLocalProps.load(it) }
         }
-        // The phone build embeds nexus_mobile compiled from ../nexus_mobile/.env.prod (melos
-        // app:aar), so that file's token is the one the server expects from this APK too. Without
-        // it a build fell back to the placeholder and every chat bar call got 401.
-        def nexusMobileToken = null
+        // The embedded app's gitignored env file, compiled into its AAR (melos app:aar).
         def nexusMobileEnv = rootProject.file("../nexus_mobile/.env.prod")
-        if (nexusMobileEnv.exists()) {
-            nexusMobileEnv.eachLine { line ->
-                def m = line =~ /^\s*NEXUS_ACCESS_TOKEN\s*=\s*(.*?)\s*$/
-                if (m.matches()) nexusMobileToken = m.group(1).replaceAll(/^["']|["']$/, '')
-            }
-        }
-        def nexusAccessToken = System.getenv("NEXUS_ACCESS_TOKEN") ?:
-            (nexusLocalProps.getProperty("NEXUS_ACCESS_TOKEN") ?:
-            (project.findProperty("NEXUS_ACCESS_TOKEN") ?:
-            (nexusMobileToken ?: "yoursupersecretlocaldevkey")))
-        buildConfigField "String", "NEXUS_ACCESS_TOKEN", "\"${nexusAccessToken}\""
 
         // The relay's public key, which Eir's /coach/** is sealed to (nexus-health: health data does
         // not cross the tunnel in the clear). Public, but read like the token: the NEXUS_RELAY_PUBLIC_KEY
@@ -357,6 +340,12 @@ android {
             }
         }
 
+        // JVM unit tests of the Nexus login gate (`./gradlew testLawnWithQuickstepGithubDebugUnitTest`).
+        testLawn {
+            java.srcDirs = ['lawnchair/tests']
+            kotlin.directories.addAll('lawnchair/tests')
+        }
+
         github {
             manifest.srcFile "github/AndroidManifest.xml"
         }
@@ -411,6 +400,7 @@ composeCompiler {
 addFrameworkJar('framework-16.jar')
 
 dependencies {
+    testImplementation libs.junit
     // The Nexus orb, at the neural_orb_android version nexus resolved (settings.gradle).
     implementation "no.nordli:neural-orb-android:${gradle.neuralOrbAndroid.version}"
     // The Nexus app itself (nexus_mobile as a release Flutter AAR; `melos app:aar`),
@@ -577,6 +567,9 @@ licensee {
     allowUrl("https://github.com/patrykmichalik/opto/blob/master/LICENSE")
     allowUrl("https://github.com/RikkaApps/HiddenApiRefinePlugin/blob/main/LICENSE")
     allowUrl("https://opensource.org/licenses/mit-license.php")
+    // Google Play services libraries the (undrawn) Google sign-in plugin pulls in: Google's own
+    // Android SDK terms.
+    allowUrl("https://developer.android.com/studio/terms.html")
     // The Nexus orb (no.nordli:neural-orb-android) declares MIT by SPDX id.
     allow(SpdxId.MIT)
     // The embedded Nexus app (`melos app:aar`): Flutter's engine and the plugin AARs that
@@ -600,6 +593,14 @@ licensee {
         'no.nordli.nexus.health.sync',
         'no.nordli.nexus.module',
         'no.nordli.nexus.notes.widgets',
+        // Sign-in (serverpod_auth_idp_flutter): the email session's secure storage and web-auth
+        // plugin, share_plus (opening a run's 3D model), and the Google / Apple sign-in plugins
+        // that come with it. The Google and Apple buttons are not drawn (kShowSocialSignIn).
+        'com.aboutyou.dart_packages.sign_in_with_apple',
+        'com.it_nomads.fluttersecurestorage',
+        'com.linusu.flutter_web_auth_2',
+        'dev.fluttercommunity.plus.share',
+        'io.flutter.plugins.googlesignin',
     ].each { group ->
         ignoreDependencies(group) { because 'Flutter add-to-app AAR without POM license metadata' }
     }
