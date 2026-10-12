@@ -593,6 +593,8 @@ licensee {
         'com.llfbandit.record',
         'com.ryanheise.audio_session',
         'com.ryanheise.just_audio',
+        // sqflite backs the app's saved copies (SnapshotStore).
+        'com.tekartik.sqflite',
         'dev.fluttercommunity.plus.connectivity',
         'no.nordli.neuralorb.flutter',
         'no.nordli.nexus.health.sync',
