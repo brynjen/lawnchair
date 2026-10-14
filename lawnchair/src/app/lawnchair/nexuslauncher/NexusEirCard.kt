@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.lawnchair.nexus.LocalNexusColors
 import app.lawnchair.nexus.NexusAppActivity
 import app.lawnchair.nexus.coach.EirCoach
 
@@ -116,11 +117,13 @@ private fun openEir(context: Context) {
     )
 }
 
-private val EirSurface = Color(0xFF14141E)
-private val EirBorder = Color(0x14FFFFFF)
-private val EirText = Color(0xFFF0F0F5)
-private val EirText3 = Color(0x61F0F0F5)
-private val EirAccent = Color(0xFF7AB8FF)
-private val EirGood = Color(0xFF5EEAD4)
-private val EirWarn = Color(0xFFF5C475)
-private val EirBad = Color(0xFFF87171)
+// The page's palette (the app's colours in the person's mode), read where they are drawn.
+private val EirSurface: Color @Composable get() = LocalNexusColors.current.surface
+private val EirBorder: Color @Composable get() = LocalNexusColors.current.border
+private val EirText: Color @Composable get() = LocalNexusColors.current.text
+private val EirText3: Color @Composable get() = LocalNexusColors.current.text3
+private val EirAccent: Color
+    @Composable get() = LocalNexusColors.current.let { if (it.isDark) it.accent else it.accentDeep }
+private val EirGood: Color @Composable get() = LocalNexusColors.current.good
+private val EirWarn: Color @Composable get() = LocalNexusColors.current.warn
+private val EirBad: Color @Composable get() = LocalNexusColors.current.bad

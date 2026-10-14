@@ -1,12 +1,20 @@
 package app.lawnchair.nexus.net
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
 import android.util.Log
 import app.lawnchair.nexus.box.SubstrateFrame
 import app.lawnchair.nexus.box.SubstrateMode
 import app.lawnchair.nexus.box.SubstrateService
 import app.lawnchair.nexus.box.SubstrateSlot
 import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsItem
+import app.lawnchair.nexus.news.NewsKind
 import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -25,7 +33,9 @@ import kotlin.math.sin
  *    the real [app.lawnchair.nexus.voice.NexusTtsPlayer]) + sources, then completes. Set
  *    [failMidway] to exercise the error/red-flash path.
  *  - [watchBox] loops a quiet box, then two actors working, so the orb's all-slots draw can be seen;
- *    [newsFeed] and [newsRefresh] answer with three canned cards.
+ *    [newsFeed] and [newsRefresh] answer with four canned cards (a paper with every field, a news card
+ *    with a picture, a long title with nothing else, a card with a single key point) and [newsImage]
+ *    draws a gradient.
  *
  * WAV (not Opus) is deliberate: it isolates the playback *plumbing* (queueing, drain, envelope, orb
  * Speaking) from the platform Opus decoder, which is only spot-checked against the live server.
@@ -152,15 +162,80 @@ class FakeNexusTransport(
         val now = Instant.now()
         return NewsFeed(
             items = listOf(
-                NewsItem(1, "Example News", "https://example.com/1", "Open-weight models close the gap",
-                    "A new wave of permissive models matches last year's flagships.", "The full story.",
-                    now.minusSeconds(42 * 60), listOf("ai", "tech")),
-                NewsItem(2, "Example Science", "https://example.com/2", "A stability record for fusion",
-                    "A tokamak team reports minutes of net-positive plasma.", null,
-                    now.minusSeconds(3 * 3600), listOf("science")),
-                NewsItem(3, "Example Security", "https://example.com/3", "Threat-modelling voice assistants",
-                    "From replay attacks to prompt injection over audio.", null,
-                    now.minusSeconds(26 * 3600), listOf("security", "ai")),
+                NewsItem(
+                    id = 1,
+                    sourceName = "arXiv",
+                    url = "https://arxiv.org/abs/0000.00001",
+                    title = "Cheaper long-context attention without losing accuracy on retrieval tasks",
+                    synopsis = "The authors replace full attention in the upper layers with a learned sparse pattern and " +
+                        "match the dense baseline on retrieval and summarisation while cutting memory use sharply.",
+                    body = "Long-context models spend most of their memory on attention. The paper keeps full attention " +
+                        "in the first layers, where it matters for local structure, and replaces it above that with a " +
+                        "sparse pattern the model learns during training.\n\nOn needle-in-a-haystack retrieval up to " +
+                        "128k tokens the sparse model matches the dense baseline. On summarisation it loses under one " +
+                        "point. Training cost is within 5% of the baseline, and inference memory falls by more than a " +
+                        "third.\n\nThe authors release the code and the checkpoints, and list the cases where the " +
+                        "pattern fails: documents whose key facts are spread evenly across the whole text.",
+                    publishedAt = now.minusSeconds(2 * 3600),
+                    tags = listOf("ai", "research"),
+                    kind = NewsKind.Paper,
+                    keyPoints = listOf(
+                        "Full attention is kept in the first layers; the upper layers learn a sparse pattern.",
+                        "Retrieval accuracy up to 128k tokens matches the dense baseline.",
+                        "Inference memory falls by 38%, with training cost within 5%.",
+                        "Fails on texts whose key facts are spread evenly throughout.",
+                    ),
+                    figures = listOf(
+                        NewsFigure("38%", "less inference memory"),
+                        NewsFigure("128k", "tokens of context tested"),
+                        NewsFigure("-0.8 pt", "on summarisation against the baseline"),
+                        NewsFigure("5%", "extra training cost at most"),
+                    ),
+                    imageUrl = "/uploads/system/news/ab12cd34ef56.jpg",
+                    imageGenerated = true,
+                ),
+                NewsItem(
+                    id = 2,
+                    sourceName = "NRK",
+                    url = "https://example.com/budget",
+                    title = "Regjeringen la frem budsjettet",
+                    synopsis = "Statsbudsjettet inneholder flere endringer i skatt og forsvar, og de største postene " +
+                        "gjelder helse og samferdsel.",
+                    body = "Regjeringen la i dag frem forslaget til statsbudsjett. Det viktigste er økte bevilgninger " +
+                        "til forsvar og helse, mens skatten på formue og eiendom justeres.\n\nOpposisjonen sier " +
+                        "forslaget ikke gjør nok for kommunene.",
+                    publishedAt = now.minusSeconds(42 * 60),
+                    tags = listOf("norge"),
+                    keyPoints = listOf(
+                        "Forsvar og helse får de største økningene.",
+                        "Formuesskatten justeres, eiendomsskatten ligger fast.",
+                        "Opposisjonen mener kommunene taper.",
+                    ),
+                    figures = listOf(NewsFigure("NOK 2.1 bn", "ekstra til forsvar")),
+                    imageUrl = "/uploads/system/news/cd34ef56ab12.jpg",
+                ),
+                NewsItem(
+                    id = 3,
+                    sourceName = "Example Security",
+                    url = "https://example.com/vpn",
+                    title = "A serious flaw in a popular VPN client lets a website read traffic that should have been " +
+                        "tunnelled, and the vendor has not yet shipped a fix for all platforms",
+                    synopsis = "Researchers advise updating at once where a patch exists.",
+                    body = null,
+                    publishedAt = now.minusSeconds(26 * 3600),
+                    tags = listOf("security"),
+                ),
+                NewsItem(
+                    id = 4,
+                    sourceName = "Example Science",
+                    url = "https://example.com/fusion",
+                    title = "A stability record for fusion",
+                    synopsis = "A tokamak team reports minutes of net-positive plasma.",
+                    body = null,
+                    publishedAt = now.minusSeconds(3 * 3600),
+                    tags = listOf("science"),
+                    keyPoints = listOf("Net-positive plasma was held for several minutes."),
+                ),
             ),
             refreshedAt = now,
         )
@@ -169,6 +244,23 @@ class FakeNexusTransport(
     override suspend fun newsRefresh(base: String, token: String): NewsFeed {
         delay(1_500) // a sweep takes a while
         return newsFeed(base, token, 50)
+    }
+
+    /** A gradient JPEG standing in for the server's picture, so a mock card has one to show. */
+    override suspend fun newsImage(base: String, token: String, path: String): ByteArray {
+        delay(100)
+        val hue = (path.hashCode() and 0x7FFFFFFF) % 360
+        val bitmap = Bitmap.createBitmap(640, 360, Bitmap.Config.ARGB_8888)
+        val paint = Paint().apply {
+            shader = LinearGradient(
+                0f, 0f, 640f, 360f,
+                Color.HSVToColor(floatArrayOf(hue.toFloat(), 0.45f, 0.85f)),
+                Color.HSVToColor(floatArrayOf(((hue + 60) % 360).toFloat(), 0.6f, 0.45f)),
+                Shader.TileMode.CLAMP,
+            )
+        }
+        Canvas(bitmap).drawRect(0f, 0f, 640f, 360f, paint)
+        return ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
     }
 
     private companion object {

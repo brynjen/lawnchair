@@ -11,13 +11,33 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
-/** One card of the server's news feed (`NewsCard`); [body] is null when only the synopsis was kept. */
+/** What a card is: an article, or a research paper (its headings read differently). */
+enum class NewsKind(val wire: String) {
+    News("news"),
+    Paper("paper"),
+    ;
+
+    companion object {
+        /** A kind this build does not know is read as news. */
+        fun fromWire(value: String?): NewsKind = entries.firstOrNull { it.wire == value } ?: News
+    }
+}
+
+/** One number an article states: [value] as it writes it ("14%", "NOK 2.1 bn") and what it measures. */
+data class NewsFigure(val value: String, val label: String)
+
+/**
+ * One card of the server's news feed (`NewsCard`); [body] is null when only the synopsis was kept.
+ * [imageUrl] is a path on the server (`/uploads/system/news/<hash>.jpg`), never an outside address;
+ * [imageGenerated] says the box drew the picture instead of taking it from the article.
+ */
 data class NewsItem(
     val id: Long,
     val sourceName: String,
@@ -27,11 +47,17 @@ data class NewsItem(
     val body: String?,
     val publishedAt: Instant?,
     val tags: List<String>,
+    val kind: NewsKind = NewsKind.News,
+    val keyPoints: List<String> = emptyList(),
+    val figures: List<NewsFigure> = emptyList(),
+    val imageUrl: String? = null,
+    val imageGenerated: Boolean = false,
 )
 
 /**
  * The server's `NewsFeed`, the body of `POST /news` `feed` and `refresh`:
- * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags"}],"refreshedAt"}`.
+ * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags","kind",
+ * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated"}],"refreshedAt"}`.
  * The same shape is what the on-device cache keeps ([toJson]), so one parser reads both.
  */
 data class NewsFeed(val items: List<NewsItem>, val refreshedAt: Instant?) {
@@ -42,8 +68,9 @@ data class NewsFeed(val items: List<NewsItem>, val refreshedAt: Instant?) {
 
 /**
  * Reads a feed's JSON defensively: a card with no id or no title is skipped, a repeated id keeps its
- * first card, missing text is empty, tags are lower-cased and de-duplicated. Null when [text] is not
- * an object with a `cards` array.
+ * first card, missing text is empty, tags are lower-cased and de-duplicated. The newer fields may all
+ * be absent (an older server, an older cache): no key points, no figures, no picture, kind news. Null
+ * when [text] is not an object with a `cards` array.
  */
 fun parseNewsFeed(text: String): NewsFeed? {
     val feed = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
@@ -69,7 +96,19 @@ private fun parseItem(element: JsonElement): NewsItem? {
         tags = (o["tags"] as? JsonArray).orEmpty()
             .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.lowercase()?.takeIf { t -> t.isNotEmpty() } }
             .distinct(),
+        kind = NewsKind.fromWire(o.text("kind")),
+        keyPoints = (o["keyPoints"] as? JsonArray).orEmpty()
+            .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { t -> t.isNotEmpty() } },
+        figures = (o["figures"] as? JsonArray).orEmpty().mapNotNull { parseFigure(it) },
+        imageUrl = o.text("imageUrl")?.trim()?.takeIf { it.isNotEmpty() },
+        imageGenerated = (o["imageGenerated"] as? JsonPrimitive)?.booleanOrNull ?: false,
     )
+}
+
+private fun parseFigure(element: JsonElement): NewsFigure? {
+    val o = element as? JsonObject ?: return null
+    val value = o.text("value")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return NewsFigure(value, o.text("label")?.trim().orEmpty())
 }
 
 /** The feed in the wire shape [parseNewsFeed] reads (instants as ISO-8601 UTC). */
@@ -85,6 +124,18 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 put("body", item.body)
                 put("publishedAt", item.publishedAt?.toString())
                 putJsonArray("tags") { item.tags.forEach { add(JsonPrimitive(it)) } }
+                put("kind", item.kind.wire)
+                putJsonArray("keyPoints") { item.keyPoints.forEach { add(JsonPrimitive(it)) } }
+                putJsonArray("figures") {
+                    item.figures.forEach { figure ->
+                        addJsonObject {
+                            put("value", figure.value)
+                            put("label", figure.label)
+                        }
+                    }
+                }
+                put("imageUrl", item.imageUrl)
+                put("imageGenerated", item.imageGenerated)
             }
         }
     }

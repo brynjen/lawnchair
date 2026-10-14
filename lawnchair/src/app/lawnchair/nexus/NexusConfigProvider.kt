@@ -49,6 +49,10 @@ class NexusConfigProvider : ContentProvider() {
         const val KEY_VOICE_OFF = "flutter.nexus.presence.voiceOff"
         const val KEY_VOICE_OFF_REASON = "flutter.nexus.presence.voiceOffReason"
 
+        // The person's Light / Dark / System choice (nexus_mobile ThemeModeCubit): the string
+        // `light` or `dark`, anything else (or absent) meaning the system's.
+        const val KEY_THEME_MODE = "flutter.app.theme.mode"
+
         // Cursor column names (the contract the launcher consumes).
         val COLUMNS = arrayOf(
             "serverUrl",
@@ -63,6 +67,7 @@ class NexusConfigProvider : ContentProvider() {
             "signedIn",
             "onboarded",
             "authKey",
+            "themeMode",
         )
     }
 
@@ -93,6 +98,7 @@ class NexusConfigProvider : ContentProvider() {
                 boolToInt(readBool(auth, KEY_SIGNED_IN)),
                 boolToInt(readBool(auth, KEY_ONBOARDED)),
                 auth.getString(KEY_AUTH_KEY, "") ?: "",
+                prefs.getString(KEY_THEME_MODE, "") ?: "",
             ),
         )
         return cursor

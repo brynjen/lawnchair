@@ -57,6 +57,8 @@ data class NexusStatus(
     val onboarded: Boolean = false,
     /** The signed-in person's session key, which every call to the server carries; blank when out. */
     val authKey: String = "",
+    /** The person's Light / Dark / System choice in the app; the system's when the app never said. */
+    val themeMode: NexusThemeMode = NexusThemeMode.System,
 ) {
     /** The first thing missing, or [NexusLock.None]. A flag without a key does not count as signed in. */
     val lock: NexusLock
@@ -140,6 +142,7 @@ object NexusConfig {
                     // flag without the key (the key's file is kept out of backups).
                     signedIn = cursor.bool("signedIn") && authKey.isNotEmpty(),
                     onboarded = cursor.bool("onboarded"),
+                    themeMode = NexusThemeMode.fromWire(cursor.string("themeMode")),
                 )
             }
         } catch (_: SecurityException) {

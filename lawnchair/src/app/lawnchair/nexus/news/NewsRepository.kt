@@ -69,13 +69,14 @@ class NewsRepository(
     suspend fun load(): NewsFeed? = calls.withLock { fetch() }
 
     /**
-     * Asks the server to sweep its sources now (it may take many seconds), then loads the feed. If the
-     * sweep fails or times out the feed is loaded anyway; if only the load fails the sweep's own answer,
-     * the same shape, is used.
+     * Asks the server to sweep its sources now (it may take many seconds), then loads the feed, and
+     * says what came of it ([refreshResult], against what the page [shown]). If the sweep fails or
+     * times out the feed is loaded anyway; if only the load fails the sweep's own answer, the same
+     * shape, is used; if both fail the result is [RefreshResult.Unreachable] and the saved copy stays.
      */
-    suspend fun sweep(): NewsFeed? = calls.withLock {
+    suspend fun sweep(shown: NewsFeed?): RefreshResult = calls.withLock {
         val swept = attempt(SWEEP_TIMEOUT_MS) { transport.newsRefresh(serverUrl, authKey) }
-        fetch() ?: swept?.also { save(it) }
+        refreshResult(shown, fetch() ?: swept?.also { save(it) })
     }
 
     private suspend fun fetch(): NewsFeed? =

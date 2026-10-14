@@ -4,6 +4,7 @@ import app.lawnchair.nexus.box.SubstrateFrame
 import app.lawnchair.nexus.box.parseSubstrateFrame
 import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.parseNewsFeed
+import app.lawnchair.nexus.news.resolveNewsImageUrl
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -25,6 +26,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import okhttp3.ResponseBody
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
@@ -151,41 +153,61 @@ class NexusClient(
     private fun readNews(body: String): NewsFeed =
         parseNewsFeed(body) ?: throw java.io.IOException("Unreadable news feed")
 
+    /**
+     * `GET base+path` with the session key → the picture's bytes (a news picture, `/uploads/system/news/...`).
+     * The path must resolve to this server ([resolveNewsImageUrl]); a 401 is a [NexusUnauthorizedException].
+     */
+    override suspend fun newsImage(base: String, token: String, path: String): ByteArray {
+        val url = resolveNewsImageUrl(base, path) ?: throw java.io.IOException("Not a picture of this server: $path")
+        val request = Request.Builder()
+            .url(url)
+            .apply { if (token.isNotEmpty()) header("Authorization", bearer(token)) }
+            .get()
+            .build()
+        return execute(request, path) { it.bytes() }
+    }
+
     private suspend fun post(
         base: String,
         endpoint: String,
         token: String,
         json: JSONObject,
-    ): String = suspendCancellableCoroutine { cont ->
+    ): String {
         val request = Request.Builder()
             .url(unaryUrl(base, endpoint))
             .apply { if (token.isNotEmpty()) header("Authorization", bearer(token)) }
             .post(json.toString().toRequestBody(JSON_MEDIA))
             .build()
-        val call = http.newCall(request)
-        cont.invokeOnCancellation { runCatching { call.cancel() } }
-        call.enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {
-                if (cont.isActive) cont.resumeWithException(e)
-            }
+        return execute(request, endpoint) { it.string() }
+    }
 
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!cont.isActive) return
-                    val text = it.body?.string().orEmpty()
-                    if (it.code == 401) {
-                        cont.resumeWithException(NexusUnauthorizedException())
-                    } else if (!it.isSuccessful) {
-                        cont.resumeWithException(
-                            java.io.IOException("HTTP ${it.code} for $endpoint: $text"),
-                        )
-                    } else {
-                        cont.resume(text)
+    /** Runs [request]; [read] turns a successful body into the result, a 401 is [NexusUnauthorizedException]. */
+    private suspend fun <T> execute(request: Request, what: String, read: (ResponseBody) -> T): T =
+        suspendCancellableCoroutine { cont ->
+            val call = http.newCall(request)
+            cont.invokeOnCancellation { runCatching { call.cancel() } }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    if (cont.isActive) cont.resumeWithException(e)
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        if (!cont.isActive) return
+                        if (it.code == 401) {
+                            cont.resumeWithException(NexusUnauthorizedException())
+                        } else if (!it.isSuccessful) {
+                            val text = it.body?.string().orEmpty().take(300)
+                            cont.resumeWithException(java.io.IOException("HTTP ${it.code} for $what: $text"))
+                        } else {
+                            val result = runCatching { read(it.body) }
+                            result.exceptionOrNull()?.let { e -> cont.resumeWithException(e) }
+                                ?: cont.resume(result.getOrThrow())
+                        }
                     }
                 }
-            }
-        })
-    }
+            })
+        }
 
     // endregion
 

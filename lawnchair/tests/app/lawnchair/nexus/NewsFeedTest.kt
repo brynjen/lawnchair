@@ -1,7 +1,9 @@
 package app.lawnchair.nexus
 
 import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsItem
+import app.lawnchair.nexus.news.NewsKind
 import app.lawnchair.nexus.news.agoText
 import app.lawnchair.nexus.news.newsTags
 import app.lawnchair.nexus.news.parseNewsFeed
@@ -117,6 +119,71 @@ class NewsFeedTest {
         assertEquals(feed, parseNewsFeed(feed.toJson()))
         assertEquals(NewsFeed.EMPTY, parseNewsFeed(NewsFeed.EMPTY.toJson()))
     }
+
+    // region the summary fields
+
+    private val rich = """
+        {"cards":[{"id":5,"sourceName":"arXiv cs.LG","url":"https://arxiv.org/abs/1","title":"Sparse experts","synopsis":"S",
+          "body":"B","publishedAt":null,"tags":["ai"],"kind":"paper",
+          "keyPoints":["Routes each token to two experts"," ","Halves latency"],
+          "figures":[{"value":"41 → 14 ms","label":"latency per token"},{"value":"","label":"no number"},{"value":"3x"},
+                     {"label":"no value"},"junk"],
+          "imageUrl":"/uploads/system/news/rig-pic1.jpg","imageGenerated":true}],"refreshedAt":null}
+    """.trimIndent()
+
+    @Test
+    fun `kind, key points, figures and the picture read field for field`() {
+        val item = parseNewsFeed(rich)!!.items.single()
+        assertEquals(NewsKind.Paper, item.kind)
+        assertEquals(listOf("Routes each token to two experts", "Halves latency"), item.keyPoints)
+        assertEquals(listOf(NewsFigure("41 → 14 ms", "latency per token"), NewsFigure("3x", "")), item.figures)
+        assertEquals("/uploads/system/news/rig-pic1.jpg", item.imageUrl)
+        assertEquals(true, item.imageGenerated)
+    }
+
+    @Test
+    fun `an older server or cache with none of them reads as a plain news card`() {
+        val item = parseNewsFeed("""{"cards":[{"id":1,"title":"T"}]}""")!!.items.single()
+        assertEquals(NewsKind.News, item.kind)
+        assertEquals(emptyList<String>(), item.keyPoints)
+        assertEquals(emptyList<NewsFigure>(), item.figures)
+        assertNull(item.imageUrl)
+        assertEquals(false, item.imageGenerated)
+    }
+
+    @Test
+    fun `explicit nulls and blanks read as absent`() {
+        val item = parseNewsFeed(
+            """{"cards":[{"id":1,"title":"T","kind":null,"keyPoints":null,"figures":null,"imageUrl":"  ","imageGenerated":null}]}""",
+        )!!.items.single()
+        assertEquals(NewsKind.News, item.kind)
+        assertEquals(emptyList<String>(), item.keyPoints)
+        assertEquals(emptyList<NewsFigure>(), item.figures)
+        assertNull(item.imageUrl)
+        assertEquals(false, item.imageGenerated)
+        assertNull(parseNewsFeed("""{"cards":[{"id":1,"title":"T","imageUrl":null}]}""")!!.items.single().imageUrl)
+    }
+
+    @Test
+    fun `a kind this build does not know is news, and a wrong-typed flag is false`() {
+        val item = parseNewsFeed("""{"cards":[{"id":1,"title":"T","kind":"podcast","imageGenerated":"maybe","keyPoints":"x","figures":{}}]}""")!!
+            .items.single()
+        assertEquals(NewsKind.News, item.kind)
+        assertEquals(false, item.imageGenerated)
+        assertEquals(emptyList<String>(), item.keyPoints)
+        assertEquals(emptyList<NewsFigure>(), item.figures)
+    }
+
+    @Test
+    fun `the new fields survive the cache`() {
+        val feed = parseNewsFeed(rich)!!
+        assertEquals(feed, parseNewsFeed(feed.toJson()))
+        // A picture-less card does too, and an old cache written before the fields is still readable.
+        val plain = parseNewsFeed(full)!!
+        assertEquals(plain, parseNewsFeed(plain.toJson()))
+    }
+
+    // endregion
 
     // region ago
 

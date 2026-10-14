@@ -1,18 +1,17 @@
 package app.lawnchair.nexus
 
-import app.lawnchair.nexus.box.SubstrateFrame
 import app.lawnchair.nexus.news.NewsCache
 import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.news.NewsRepository
+import app.lawnchair.nexus.news.RefreshResult
+import app.lawnchair.nexus.news.message
+import app.lawnchair.nexus.news.refreshResult
 import app.lawnchair.nexus.net.NexusTransport
-import app.lawnchair.nexus.net.NexusTurnEvent
 import app.lawnchair.nexus.net.NexusUnauthorizedException
-import app.lawnchair.nexus.net.TranscriptionEvent
 import java.io.File
 import java.io.IOException
 import java.time.Instant
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -107,7 +106,7 @@ class NewsRepositoryTest {
     private class News(
         val onFeed: () -> NewsFeed,
         val onRefresh: () -> NewsFeed = { throw IOException("no sweep") },
-    ) : NexusTransport {
+    ) : StubNexusTransport() {
         var feedCalls = 0
         var refreshCalls = 0
 
@@ -120,51 +119,6 @@ class NewsRepositoryTest {
             refreshCalls++
             return onRefresh()
         }
-
-        override suspend fun createConversation(base: String, token: String): Int = unused()
-
-        override suspend fun submitTurn(
-            base: String,
-            token: String,
-            conversationId: Int,
-            userText: String,
-            turnId: String,
-        ) = unused()
-
-        override suspend fun answerUserPrompt(
-            base: String,
-            token: String,
-            conversationId: Int,
-            promptId: String,
-            answer: String,
-        ) = unused()
-
-        override suspend fun cancelTurn(
-            base: String,
-            token: String,
-            conversationId: Int,
-            heardThroughSegmentIndex: Int?,
-        ) = unused()
-
-        override fun streamTurn(
-            base: String,
-            token: String,
-            conversationId: Int,
-            onReady: () -> Unit,
-        ): Flow<NexusTurnEvent> = unused()
-
-        override fun streamTranscription(
-            base: String,
-            token: String,
-            recordingId: String,
-            sessionId: String,
-            pcm16Chunks: Flow<ByteArray>,
-            language: String?,
-        ): Flow<TranscriptionEvent> = unused()
-
-        override fun watchBox(base: String, token: String): Flow<SubstrateFrame> = unused()
-
-        private fun unused(): Nothing = error("not used by the news")
     }
 
     private fun repository(transport: NexusTransport, authKey: String = key) =
@@ -214,16 +168,23 @@ class NewsRepositoryTest {
     fun `a sweep asks the server to refresh, then loads the feed`() = runBlocking {
         val transport = News(onFeed = { feed(5, 6) }, onRefresh = { feed(5) })
         val repo = repository(transport)
-        assertEquals(feed(5, 6), repo.sweep())
+        assertEquals(RefreshResult.New(feed(5, 6), 2), repo.sweep(shown = null))
         assertEquals(1, transport.refreshCalls)
         assertEquals(1, transport.feedCalls)
         assertEquals(feed(5, 6), repo.saved())
     }
 
     @Test
+    fun `a sweep that brings nothing the page lacks is up to date`() = runBlocking {
+        val repo = repository(News(onFeed = { feed(5, 6) }, onRefresh = { feed(5, 6) }))
+        assertEquals(RefreshResult.UpToDate(feed(5, 6)), repo.sweep(shown = feed(5, 6)))
+        assertEquals(RefreshResult.New(feed(5, 6), 1), repo.sweep(shown = feed(5)))
+    }
+
+    @Test
     fun `a sweep that fails still loads the feed`() = runBlocking {
         val transport = News(onFeed = { feed(7) }) // onRefresh throws
-        assertEquals(feed(7), repository(transport).sweep())
+        assertEquals(RefreshResult.New(feed(7), 1), repository(transport).sweep(shown = feed(1)))
         assertEquals(1, transport.feedCalls)
     }
 
@@ -231,17 +192,49 @@ class NewsRepositoryTest {
     fun `a sweep whose load fails uses the sweep's own answer`() = runBlocking {
         val transport = News(onFeed = { throw IOException("dropped") }, onRefresh = { feed(8) })
         val repo = repository(transport)
-        assertEquals(feed(8), repo.sweep())
+        assertEquals(RefreshResult.New(feed(8), 1), repo.sweep(shown = null))
         assertEquals(feed(8), repo.saved())
     }
 
     @Test
-    fun `a sweep that fails altogether is null and keeps the saved copy`() = runBlocking {
+    fun `a sweep that fails altogether is unreachable and keeps the saved copy`() = runBlocking {
         NewsCache(tmp.root).write(url, key, feed(1, 2))
         val repo = repository(News(onFeed = { throw IOException("offline") }))
-        assertNull(repo.sweep())
+        assertEquals(RefreshResult.Unreachable, repo.sweep(shown = feed(1, 2)))
         assertEquals(feed(1, 2), repo.saved())
     }
+
+    // region what a refresh says
+
+    @Test
+    fun `new cards are told by id, wherever they sit`() {
+        assertEquals(RefreshResult.New(feed(3, 1, 2), 1), refreshResult(shown = feed(1, 2), fresh = feed(3, 1, 2)))
+        assertEquals(RefreshResult.New(feed(1, 2), 2), refreshResult(shown = null, fresh = feed(1, 2)))
+        assertEquals(RefreshResult.New(feed(1, 2), 2), refreshResult(shown = NewsFeed.EMPTY, fresh = feed(1, 2)))
+    }
+
+    @Test
+    fun `nothing new is up to date, even when cards left the feed`() {
+        assertEquals(RefreshResult.UpToDate(feed(2, 1)), refreshResult(shown = feed(1, 2), fresh = feed(2, 1)))
+        assertEquals(RefreshResult.UpToDate(feed(2)), refreshResult(shown = feed(1, 2), fresh = feed(2)))
+        assertEquals(RefreshResult.UpToDate(NewsFeed.EMPTY), refreshResult(shown = null, fresh = NewsFeed.EMPTY))
+    }
+
+    @Test
+    fun `no feed at all is unreachable`() {
+        assertEquals(RefreshResult.Unreachable, refreshResult(shown = feed(1), fresh = null))
+        assertEquals(RefreshResult.Unreachable, refreshResult(shown = null, fresh = null))
+    }
+
+    @Test
+    fun `the page's words for each`() {
+        assertEquals("1 new article", RefreshResult.New(feed(1), 1).message())
+        assertEquals("2 new articles", RefreshResult.New(feed(1, 2), 2).message())
+        assertEquals("Up to date", RefreshResult.UpToDate(feed(1)).message())
+        assertEquals("Couldn't reach Nexus. Showing saved articles.", RefreshResult.Unreachable.message())
+    }
+
+    // endregion
 
     // endregion
 }

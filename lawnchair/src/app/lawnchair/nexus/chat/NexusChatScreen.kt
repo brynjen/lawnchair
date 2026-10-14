@@ -565,6 +565,8 @@ private fun ChatOrb(controller: NexusChatController, phase: TurnPhase, failureSi
         externalAmplitude = controller::externalAmplitude,
         failureSignal = failureSignal,
         box = box.takeIf { it.isKnown && !live },
+        // The chat is dark whatever the system is (a black scrim over the wallpaper): light ink.
+        dark = true,
     )
 }
 

@@ -90,15 +90,20 @@ private fun themeFor(dark: Boolean, accent: Color): OrbTheme {
     return base.copy(id = "${base.id}-nexus", palette = palette)
 }
 
-/** The glow setting (0..1; 0.6 is the renderer's own look) as bloom and node glow. */
-private fun tuningFor(theme: OrbTheme, glow: Float): OrbTuning {
+/**
+ * The glow setting (0..1; 0.6 is the renderer's own look) as bloom and node glow. [prominent] is the
+ * look for a surface where the orb is the picture rather than an indicator: the swarm fills as much
+ * of its view as the renderer allows (1.28) and its dots are larger (1.45, from 1.12), so on a big
+ * page it reads as a sphere of ink and not a speckle.
+ */
+private fun tuningFor(theme: OrbTheme, glow: Float, prominent: Boolean): OrbTuning {
     val g = glow.coerceIn(0f, 1f)
-    return OrbTuning(
-        theme.tuning.toMap() + mapOf(
-            "bloomStrength" to (0.15f + g * 1.283f),
-            "nodeGlow" to (0.25f + g * 1.333f),
-        ),
+    val base = mapOf(
+        "bloomStrength" to (0.15f + g * 1.283f),
+        "nodeGlow" to (0.25f + g * 1.333f),
     )
+    val look = if (prominent) base + mapOf("orbScale" to 1.28f, "nodeSize" to 1.45f) else base
+    return OrbTuning(theme.tuning.toMap() + look)
 }
 
 @Composable
@@ -107,14 +112,20 @@ fun NeuralOrb(
     accent: Color = Color(0xFF7AB8FF),
     state: OrbState = OrbState.Idle,
     glowIntensity: Float = 0.6f,
+    /** The orb as the picture of a surface (see [tuningFor]): a bigger swarm with bigger dots. */
+    prominent: Boolean = false,
     externalAmplitude: (() -> Float?)? = null,
     failureSignal: Int = 0,
     /** What the whole box is doing, drawn slot by slot in place of [state]; null draws [state] alone. */
     box: BoxOrbState? = null,
+    /**
+     * Light ink (the dark theme) or dark ink. Follows the system, but a surface that is dark whatever
+     * the system says, as the News page is, must say so: dark ink on it is a faint speck.
+     */
+    dark: Boolean = isSystemInDarkTheme(),
 ) {
-    val dark = isSystemInDarkTheme()
     val theme = remember(dark, accent) { themeFor(dark, accent) }
-    val tuning = remember(theme, glowIntensity) { tuningFor(theme, glowIntensity) }
+    val tuning = remember(theme, glowIntensity, prominent) { tuningFor(theme, glowIntensity, prominent) }
     val curState = rememberUpdatedState(state)
     val curBox = rememberUpdatedState(box)
     val curExternal = rememberUpdatedState(externalAmplitude)
@@ -171,4 +182,14 @@ fun NeuralOrb(
     modifier: Modifier = Modifier,
     accent: Color = Color(0xFF7AB8FF),
     loading: Boolean,
-) = NeuralOrb(modifier, accent, if (loading) OrbState.Loading else OrbState.Idle)
+    dark: Boolean = isSystemInDarkTheme(),
+    glowIntensity: Float = 0.6f,
+    prominent: Boolean = false,
+) = NeuralOrb(
+    modifier,
+    accent,
+    if (loading) OrbState.Loading else OrbState.Idle,
+    glowIntensity = glowIntensity,
+    prominent = prominent,
+    dark = dark,
+)

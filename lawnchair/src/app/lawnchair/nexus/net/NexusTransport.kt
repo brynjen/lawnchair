@@ -75,6 +75,12 @@ interface NexusTransport {
      * {"method":"refresh"}`). May take many seconds.
      */
     suspend fun newsRefresh(base: String, token: String): NewsFeed
+
+    /**
+     * A news picture's bytes: [path] is the server's own (`/uploads/system/news/<hash>.jpg`), fetched
+     * with the session key like any upload. Throws for a path that is not this server's.
+     */
+    suspend fun newsImage(base: String, token: String, path: String): ByteArray
 }
 
 /**

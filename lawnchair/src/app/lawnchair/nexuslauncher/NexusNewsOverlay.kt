@@ -4,6 +4,7 @@ import android.animation.ValueAnimator
 import android.view.View
 import android.view.ViewGroup
 import androidx.compose.ui.platform.ComposeView
+import androidx.core.view.WindowCompat
 import app.lawnchair.LawnchairLauncher
 import com.android.launcher3.InsettableFrameLayout
 import com.android.systemui.plugins.shared.LauncherOverlayManager
@@ -27,6 +28,12 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
     private var progress = 0f
     private var flingVelocity = 0f
     private var settleAnim: ValueAnimator? = null
+
+    // The page may be light (the person's choice in the app): while it is on screen the status bar
+    // takes dark icons, and gets the launcher's own back when it leaves.
+    private var panelDark = true
+    private var barsLifted = false
+    private var barsBefore = false
 
     private val panelParent: ViewGroup?
         get() = launcher.dragLayer?.parent as? ViewGroup
@@ -55,7 +62,15 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
     private fun ensurePanel(parent: ViewGroup) {
         if (panel != null) return
         val v = ComposeView(launcher).apply {
-            setContent { NexusNewsScreen(onClose = { animateTo(0f) }) }
+            setContent {
+                NexusNewsScreen(
+                    onClose = { animateTo(0f) },
+                    onDark = {
+                        panelDark = it
+                        applyStatusBar()
+                    },
+                )
+            }
         }
         parent.addView(
             v,
@@ -103,6 +118,22 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
 
     private fun applyProgressToPanel() {
         panel?.translationX = -panelWidth * (1f - progress)
+        applyStatusBar()
+    }
+
+    private fun applyStatusBar() {
+        val window = launcher.window ?: return
+        val bars = WindowCompat.getInsetsController(window, window.decorView)
+        if (panel != null && progress > 0.5f && !panelDark) {
+            if (!barsLifted) {
+                barsBefore = bars.isAppearanceLightStatusBars
+                barsLifted = true
+            }
+            bars.isAppearanceLightStatusBars = true
+        } else if (barsLifted) {
+            bars.isAppearanceLightStatusBars = barsBefore
+            barsLifted = false
+        }
     }
 
     private fun animateTo(target: Float) {
@@ -126,6 +157,7 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
         settleAnim?.cancel()
         (panel?.parent as? ViewGroup)?.removeView(panel)
         panel = null
+        applyStatusBar()
         attached = false
     }
 
