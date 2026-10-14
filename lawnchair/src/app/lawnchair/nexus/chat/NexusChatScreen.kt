@@ -111,8 +111,6 @@ fun NexusChatScreen(
         }
     }
 
-    val orbState = orbStateFor(state.phase)
-
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -129,9 +127,9 @@ fun NexusChatScreen(
             },
     ) {
         if (state.mode == Mode.Voice) {
-            VoiceLayout(state, controller, appear.value, orbState)
+            VoiceLayout(state, controller, appear.value)
         } else {
-            TextLayout(state, controller, appear.value, orbState, statusBarTopPx)
+            TextLayout(state, controller, appear.value, statusBarTopPx)
         }
     }
 }
@@ -166,7 +164,6 @@ private fun BoxScope.TextLayout(
     state: NexusChatUiState,
     controller: NexusChatController,
     appear: Float,
-    orbState: OrbState,
     statusBarTopPx: Int,
 ) {
     val orbTopPadding = with(androidx.compose.ui.platform.LocalDensity.current) {
@@ -225,13 +222,7 @@ private fun BoxScope.TextLayout(
         contentAlignment = Alignment.Center,
     ) {
         // Fill the backing so the orb's sphere reads large (the composable has internal glow margin).
-        NeuralOrb(
-            modifier = Modifier.fillMaxSize(),
-            accent = Accent,
-            state = orbState,
-            externalAmplitude = controller::externalAmplitude,
-            failureSignal = state.failureSignal,
-        )
+        ChatOrb(controller, state.phase, state.failureSignal, Modifier.fillMaxSize())
     }
 }
 
@@ -240,7 +231,6 @@ private fun BoxScope.VoiceLayout(
     state: NexusChatUiState,
     controller: NexusChatController,
     appear: Float,
-    orbState: OrbState,
 ) {
     // Dim only the orb-and-below region; the top of the screen stays clear.
     PartialScrim(appear, fadeStart = 0.32f, fadeEnd = 0.48f, onTap = { controller.dismiss() })
@@ -263,13 +253,7 @@ private fun BoxScope.VoiceLayout(
                 onClick = { controller.dismiss() },
             ),
     ) {
-        NeuralOrb(
-            modifier = Modifier.fillMaxSize(),
-            accent = Accent,
-            state = orbState,
-            externalAmplitude = controller::externalAmplitude,
-            failureSignal = state.failureSignal,
-        )
+        ChatOrb(controller, state.phase, state.failureSignal, Modifier.fillMaxSize())
     }
 
     // Controls + transcript + conversation occupy the lower area, below the centred orb.
@@ -562,6 +546,26 @@ private fun SourcesBlock(sources: List<NexusSource>) {
             )
         }
     }
+}
+
+/**
+ * The chat's orb. This overlay's own turn wins while one is live; otherwise it draws the whole box,
+ * every slot the substrate stream reports, so work this phone did not start still shows, and before
+ * the first frame (or after a drop) it draws the local state alone rather than claim to know. The box
+ * is read here, not in [NexusChatScreen], so its frames recompose only the orb.
+ */
+@Composable
+private fun ChatOrb(controller: NexusChatController, phase: TurnPhase, failureSignal: Int, modifier: Modifier) {
+    val box by controller.box.collectAsState()
+    val live = phase == TurnPhase.Listening || phase == TurnPhase.Thinking || phase == TurnPhase.Speaking
+    NeuralOrb(
+        modifier = modifier,
+        accent = Accent,
+        state = orbStateFor(phase),
+        externalAmplitude = controller::externalAmplitude,
+        failureSignal = failureSignal,
+        box = box.takeIf { it.isKnown && !live },
+    )
 }
 
 private fun orbStateFor(phase: TurnPhase): OrbState = when (phase) {

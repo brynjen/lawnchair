@@ -1,5 +1,7 @@
 package app.lawnchair.nexus.chat
 
+import app.lawnchair.nexus.box.BoxOrbState
+import app.lawnchair.nexus.box.boxOrbStates
 import app.lawnchair.nexus.net.AudioSegment
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusSource
@@ -76,6 +78,15 @@ class NexusChatController(
     )
     val state: StateFlow<NexusChatUiState> = _state.asStateFlow()
 
+    private val _box = MutableStateFlow(BoxOrbState.UNKNOWN)
+
+    /**
+     * What the whole box is doing (`substrate.watch`), for the orb whenever this overlay's own turn is
+     * not live. [BoxOrbState.UNKNOWN] until the first frame and after any drop. Kept apart from
+     * [state] because frames arrive up to ten a second and must not recompose the conversation.
+     */
+    val box: StateFlow<BoxOrbState> = _box.asStateFlow()
+
     /** Where an image event's path is fetched from: joined to the server, or already absolute. */
     fun imageUrl(path: String): String =
         if (path.startsWith("http://") || path.startsWith("https://")) path
@@ -101,6 +112,10 @@ class NexusChatController(
 
     private val busy: Boolean
         get() = _state.value.phase in setOf(TurnPhase.Listening, TurnPhase.Thinking, TurnPhase.Speaking)
+
+    init {
+        watchBox()
+    }
 
     /**
      * Live amplitude for the orb's `externalAmplitude`. Invoked per frame by the orb (not via
@@ -334,6 +349,24 @@ class NexusChatController(
     // endregion
 
     // region helpers
+
+    /**
+     * The one `substrate.watch` subscription of this overlay, open from its first moment until
+     * [close] cancels [scope] (which closes the socket). A drop reads as unknown and reconnects with a
+     * backoff (see [boxOrbStates]).
+     */
+    private fun watchBox() {
+        scope.launch {
+            var trouble = false
+            boxOrbStates { transport.watchBox(serverUrl, token) }.collect { next ->
+                _box.value = next
+                // The orb encodes failure as a one-shot flicker, so a box-wide error or a shut door
+                // is fired on the way in, as on the phone.
+                if (next.trouble && !trouble) bumpFailure()
+                trouble = next.trouble
+            }
+        }
+    }
 
     private suspend fun ensureConversation(): Int? {
         conversationId?.let { return it }

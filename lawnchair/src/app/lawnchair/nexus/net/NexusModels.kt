@@ -1,5 +1,7 @@
 package app.lawnchair.nexus.net
 
+import org.json.JSONObject
+
 /**
  * Readiness/liveness snapshot returned by `POST /presence {"method":"heartbeat"}`.
  * Mirrors the server's `PresenceAck` serializable.
@@ -12,6 +14,21 @@ data class PresenceAck(
     val llmReady: Boolean,
     val allReady: Boolean,
 )
+
+/**
+ * What a Serverpod method stream says, with the `omsc` handshake, the keep-alive and the close
+ * frames already dealt with (see `NexusClient.openMethodStream`).
+ */
+sealed interface MethodStreamEvent {
+    /** One streamed value: the `msm` frame's `data.o.data` object. */
+    data class Message(val data: JSONObject) : MethodStreamEvent
+
+    /**
+     * The stream is over though the collector did not ask: the server rejected or ended it, or the
+     * socket failed or closed. [reason] is a sentence for the user or a log; the flow ends right after.
+     */
+    data class Ended(val reason: String) : MethodStreamEvent
+}
 
 /**
  * One streamed value from a `streamTurn` method-stream, already unwrapped from the

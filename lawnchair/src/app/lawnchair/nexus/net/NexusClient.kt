@@ -1,5 +1,9 @@
 package app.lawnchair.nexus.net
 
+import app.lawnchair.nexus.box.SubstrateFrame
+import app.lawnchair.nexus.box.parseSubstrateFrame
+import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.news.parseNewsFeed
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -9,7 +13,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.Call
@@ -134,6 +140,17 @@ class NexusClient(
         }
     }
 
+    /** `POST /news {"method":"feed","limit":n}` → the server's `NewsFeed`; a 401 is a [NexusUnauthorizedException]. */
+    override suspend fun newsFeed(base: String, token: String, limit: Int): NewsFeed =
+        readNews(post(base, "/news", token, JSONObject().put("method", "feed").put("limit", limit)))
+
+    /** `POST /news {"method":"refresh"}` → a sweep of the sources, then the same `NewsFeed`. Slow. */
+    override suspend fun newsRefresh(base: String, token: String): NewsFeed =
+        readNews(post(base, "/news", token, JSONObject().put("method", "refresh")))
+
+    private fun readNews(body: String): NewsFeed =
+        parseNewsFeed(body) ?: throw java.io.IOException("Unreadable news feed")
+
     private suspend fun post(
         base: String,
         endpoint: String,
@@ -172,34 +189,46 @@ class NexusClient(
 
     // endregion
 
-    // region streaming — turn
+    // region streaming — method streams
 
     /**
-     * Opens a `streamTurn` method-stream and emits [NexusTurnEvent]s as they arrive. [onReady] fires
-     * once the server acknowledges the stream (`omsr res:success`) — the caller must `POST submitTurn`
-     * from there so the turn is only triggered after the handshake completes. The flow completes on
-     * the terminal `completed`/`failed` event; cancelling the collection closes the socket (a `cmsc`
-     * close command is sent first).
+     * Opens the method stream [endpoint].[method] on `/v1/websocket` and emits what it says: each
+     * streamed value as a [MethodStreamEvent.Message], and, if the stream ends without the collector
+     * having asked, one [MethodStreamEvent.Ended] with the reason, after which the flow completes (or
+     * fails with the socket's error). [onReady] fires, on the socket's thread, once the server
+     * acknowledges the stream (`omsr res:success`). Cancelling the collection sends a `cmsc` close
+     * command and closes the socket.
+     *
+     * The `omsc` call, ping/pong and the close frames live here and nowhere else, so when the app
+     * clients are sealed (docs/client-sealing.md, C2) the codec lands in this one function.
      */
-    override fun streamTurn(
+    private fun openMethodStream(
         base: String,
         token: String,
-        conversationId: Int,
-        onReady: () -> Unit,
-    ): Flow<NexusTurnEvent> =
+        endpoint: String,
+        method: String,
+        args: JSONObject = JSONObject(),
+        onReady: () -> Unit = {},
+    ): Flow<MethodStreamEvent> =
         callbackFlow {
             val cid = UUID.randomUUID().toString()
             var closed = false
 
             fun sendClose(ws: WebSocket) {
-                runCatching { ws.send(buildCmsc(cid, ENDPOINT_VOICE, METHOD_STREAM_TURN).toString()) }
+                runCatching { ws.send(buildCmsc(cid, endpoint, method).toString()) }
                 runCatching { ws.close(1000, null) }
+            }
+
+            fun end(ws: WebSocket, reason: String) {
+                trySend(MethodStreamEvent.Ended(reason))
+                closed = true
+                sendClose(ws)
+                close()
             }
 
             val listener = object : WebSocketListener() {
                 override fun onOpen(ws: WebSocket, response: Response) {
-                    val args = JSONObject().put("conversationId", conversationId).toString()
-                    ws.send(buildOmsc(cid, ENDPOINT_VOICE, METHOD_STREAM_TURN, args, token).toString())
+                    ws.send(buildOmsc(cid, endpoint, method, args.toString(), token).toString())
                 }
 
                 override fun onMessage(ws: WebSocket, text: String) {
@@ -214,34 +243,19 @@ class NexusClient(
                             if (res == "success") {
                                 onReady()
                             } else if (res != null) {
-                                trySend(NexusTurnEvent.Failed("stream rejected: $res"))
-                                closed = true
-                                sendClose(ws)
-                                close()
+                                end(ws, "stream rejected: $res")
                             }
                         }
 
-                        "msm" -> {
-                            val event = parseTurnEvent(msg) ?: return
-                            trySend(event)
-                            if (event is NexusTurnEvent.Completed || event is NexusTurnEvent.Failed) {
-                                closed = true
-                                sendClose(ws)
-                                close()
-                            }
-                        }
+                        "msm" -> msg.optJSONObject("data")?.optJSONObject("o")?.optJSONObject("data")
+                            ?.let { trySend(MethodStreamEvent.Message(it)) }
 
-                        "msse", "brm" -> {
-                            trySend(NexusTurnEvent.Failed(msg.optJSONObject("data")?.toString() ?: "stream error"))
-                            closed = true
-                            sendClose(ws)
-                            close()
-                        }
+                        "msse", "brm" -> end(ws, msg.optJSONObject("data")?.toString() ?: "stream error")
 
                         // The server ended our method stream (a rejected token ends it this way,
                         // after omsr success). Without this the turn waited for the watchdog.
                         "cmsc" -> if (!closed && msg.optJSONObject("data")?.optString("cid") == cid) {
-                            trySend(NexusTurnEvent.Failed("Nexus closed the stream."))
+                            trySend(MethodStreamEvent.Ended("Nexus closed the stream."))
                             closed = true
                             runCatching { ws.close(1000, null) }
                             close()
@@ -250,7 +264,7 @@ class NexusClient(
                 }
 
                 override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
-                    if (!closed) trySend(NexusTurnEvent.Failed(t.message ?: "socket failure"))
+                    if (!closed) trySend(MethodStreamEvent.Ended(t.message ?: "socket failure"))
                     close(t)
                 }
 
@@ -258,7 +272,7 @@ class NexusClient(
                     ws.close(1000, null)
                     if (!closed) {
                         val why = listOf(code.toString(), reason).filter { it.isNotBlank() }.joinToString(" ")
-                        trySend(NexusTurnEvent.Failed("The connection to Nexus closed ($why)."))
+                        trySend(MethodStreamEvent.Ended("The connection to Nexus closed ($why)."))
                         closed = true
                     }
                     close()
@@ -274,9 +288,47 @@ class NexusClient(
             }
         }
 
-    /** Unwrap a `msm` frame → `data.o.data` → a [NexusTurnEvent], or null for ignored kinds. */
-    private fun parseTurnEvent(msg: JSONObject): NexusTurnEvent? {
-        val data = msg.optJSONObject("data")?.optJSONObject("o")?.optJSONObject("data") ?: return null
+    // endregion
+
+    // region streaming — turn
+
+    /**
+     * Opens a `streamTurn` method-stream and emits [NexusTurnEvent]s as they arrive. [onReady] fires
+     * once the server acknowledges the stream (`omsr res:success`) — the caller must `POST submitTurn`
+     * from there so the turn is only triggered after the handshake completes. The flow completes on
+     * the terminal `completed`/`failed` event; cancelling the collection closes the socket (a `cmsc`
+     * close command is sent first).
+     */
+    override fun streamTurn(
+        base: String,
+        token: String,
+        conversationId: Int,
+        onReady: () -> Unit,
+    ): Flow<NexusTurnEvent> =
+        openMethodStream(
+            base,
+            token,
+            ENDPOINT_VOICE,
+            METHOD_STREAM_TURN,
+            JSONObject().put("conversationId", conversationId),
+            onReady,
+        ).transformWhile { ev ->
+            when (ev) {
+                is MethodStreamEvent.Message -> {
+                    val event = parseTurnEvent(ev.data)
+                    if (event != null) emit(event)
+                    event !is NexusTurnEvent.Completed && event !is NexusTurnEvent.Failed
+                }
+
+                is MethodStreamEvent.Ended -> {
+                    emit(NexusTurnEvent.Failed(ev.reason))
+                    false
+                }
+            }
+        }
+
+    /** Read a stream message's `data.o.data` → a [NexusTurnEvent], or null for ignored kinds. */
+    private fun parseTurnEvent(data: JSONObject): NexusTurnEvent? {
         val turnId = data.optString("turnId", "").ifEmpty { null }
         return when (data.optString("kind")) {
             "textDelta" -> NexusTurnEvent.TextDelta(data.optString("textDelta", ""), turnId)
@@ -321,6 +373,24 @@ class NexusClient(
             else -> null // heartbeat — nothing to show
         }
     }
+
+    // endregion
+
+    // region streaming — substrate
+
+    /**
+     * Opens `substrate.watch`: the box's slot table, a whole snapshot per frame (the server coalesces
+     * to 10 a second and repeats the snapshot every 20 s). Only the newest frame matters, so a slow
+     * collector gets the latest ([conflate]) rather than a backlog. A frame that does not parse is
+     * dropped; the flow completes when the stream ends and fails when the socket does.
+     */
+    override fun watchBox(base: String, token: String): Flow<SubstrateFrame> =
+        openMethodStream(base, token, ENDPOINT_SUBSTRATE, METHOD_WATCH)
+            .conflate()
+            .transformWhile { ev ->
+                if (ev is MethodStreamEvent.Message) parseSubstrateFrame(ev.data.toString())?.let { emit(it) }
+                ev is MethodStreamEvent.Message
+            }
 
     // endregion
 
@@ -469,8 +539,10 @@ class NexusClient(
         private const val PING_OK = "nexus-ok"
         private const val ENDPOINT_VOICE = "voiceSquad"
         private const val ENDPOINT_AUDIO = "audio"
+        private const val ENDPOINT_SUBSTRATE = "substrate"
         private const val METHOD_STREAM_TURN = "streamTurn"
         private const val METHOD_SEND_AUDIO_CHUNK = "sendAudioChunk"
+        private const val METHOD_WATCH = "watch"
         private val JSON_MEDIA = "application/json".toMediaType()
 
         /** Build an `omsc` (open method-stream command) frame. [args] is a JSON-encoded STRING. */

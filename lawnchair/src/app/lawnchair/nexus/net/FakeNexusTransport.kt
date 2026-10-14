@@ -1,6 +1,13 @@
 package app.lawnchair.nexus.net
 
 import android.util.Log
+import app.lawnchair.nexus.box.SubstrateFrame
+import app.lawnchair.nexus.box.SubstrateMode
+import app.lawnchair.nexus.box.SubstrateService
+import app.lawnchair.nexus.box.SubstrateSlot
+import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.news.NewsItem
+import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -17,6 +24,8 @@ import kotlin.math.sin
  *  - [streamTurn] emits scripted text deltas + synthetic **WAV tone** audio segments (played through
  *    the real [app.lawnchair.nexus.voice.NexusTtsPlayer]) + sources, then completes. Set
  *    [failMidway] to exercise the error/red-flash path.
+ *  - [watchBox] loops a quiet box, then two actors working, so the orb's all-slots draw can be seen;
+ *    [newsFeed] and [newsRefresh] answer with three canned cards.
  *
  * WAV (not Opus) is deliberate: it isolates the playback *plumbing* (queueing, drain, envelope, orb
  * Speaking) from the platform Opus decoder, which is only spot-checked against the live server.
@@ -116,6 +125,50 @@ class FakeNexusTransport(
         // Mic flow completed (user released / tapped stop) → finalize.
         Log.d(TAG, "STT drained rec=$recordingId chunks=$chunks bytes=$bytes → final")
         emit(TranscriptionEvent("What's the weather like today?", isFinal = true))
+    }
+
+    override fun watchBox(base: String, token: String): Flow<SubstrateFrame> = flow {
+        var sequence = 0L
+        fun frame(vararg slots: SubstrateSlot) = SubstrateFrame(sequence++, slots.toList(), capacity = 8, dropped = 0)
+        fun slot(i: Int, mode: SubstrateMode, service: SubstrateService, actor: String) =
+            SubstrateSlot(i, mode, service, label = null, actor = actor)
+        while (true) {
+            emit(frame(SubstrateSlot(0, SubstrateMode.Idle, SubstrateService.None, null, null)))
+            delay(4_000)
+            emit(frame(slot(0, SubstrateMode.Thinking, SubstrateService.VllmChat, "conv:1")))
+            delay(1_500)
+            emit(
+                frame(
+                    slot(0, SubstrateMode.Thinking, SubstrateService.VllmChat, "conv:1"),
+                    slot(1, SubstrateMode.ToolCall, SubstrateService.Search, "subagent:2"),
+                ),
+            )
+            delay(3_000)
+        }
+    }
+
+    override suspend fun newsFeed(base: String, token: String, limit: Int): NewsFeed {
+        delay(150)
+        val now = Instant.now()
+        return NewsFeed(
+            items = listOf(
+                NewsItem(1, "Example News", "https://example.com/1", "Open-weight models close the gap",
+                    "A new wave of permissive models matches last year's flagships.", "The full story.",
+                    now.minusSeconds(42 * 60), listOf("ai", "tech")),
+                NewsItem(2, "Example Science", "https://example.com/2", "A stability record for fusion",
+                    "A tokamak team reports minutes of net-positive plasma.", null,
+                    now.minusSeconds(3 * 3600), listOf("science")),
+                NewsItem(3, "Example Security", "https://example.com/3", "Threat-modelling voice assistants",
+                    "From replay attacks to prompt injection over audio.", null,
+                    now.minusSeconds(26 * 3600), listOf("security", "ai")),
+            ),
+            refreshedAt = now,
+        )
+    }
+
+    override suspend fun newsRefresh(base: String, token: String): NewsFeed {
+        delay(1_500) // a sweep takes a while
+        return newsFeed(base, token, 50)
     }
 
     private companion object {

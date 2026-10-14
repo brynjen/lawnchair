@@ -401,6 +401,8 @@ addFrameworkJar('framework-16.jar')
 
 dependencies {
     testImplementation libs.junit
+    // The platform's org.json is a stub in JVM unit tests; the real one lets NexusClient run there.
+    testImplementation 'org.json:json:20250107'
     // The Nexus orb, at the neural_orb_android version nexus resolved (settings.gradle).
     implementation "no.nordli:neural-orb-android:${gradle.neuralOrbAndroid.version}"
     // The Nexus app itself (nexus_mobile as a release Flutter AAR; `melos app:aar`),
@@ -586,8 +588,8 @@ licensee {
         'com.llfbandit.record',
         'com.ryanheise.audio_session',
         'com.ryanheise.just_audio',
-        // sqflite backs the app's saved copies (SnapshotStore).
-        'com.tekartik.sqflite',
+        // sqflite_sqlcipher backs the app's saved copies (SnapshotStore).
+        'com.davidmartos96.sqflite_sqlcipher',
         'dev.fluttercommunity.plus.connectivity',
         'no.nordli.neuralorb.flutter',
         'no.nordli.nexus.health.sync',

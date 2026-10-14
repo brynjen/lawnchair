@@ -10,9 +10,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
+import app.lawnchair.nexus.box.BoxOrbState
+import app.lawnchair.nexus.box.SubstrateMode
 import kotlinx.coroutines.delay
 import no.nordli.neuralorb.NeuralOrbView
+import no.nordli.neuralorb.OrbController
 import no.nordli.neuralorb.OrbMode
+import no.nordli.neuralorb.OrbProcess
 import no.nordli.neuralorb.OrbTheme
 import no.nordli.neuralorb.OrbTuning
 
@@ -21,7 +25,15 @@ import no.nordli.neuralorb.OrbTuning
  * Flutter app embeds, so there is no hand-kept Compose copy of the orb any more. This file maps the
  * launcher's voice states onto it, the same mapping as `nexus_mobile/lib/core/orb/orb.dart`.
  */
-enum class OrbState { Idle, Listening, Thinking, Speaking, Searching, Loading, Muted }
+enum class OrbState {
+    Idle, Listening, Thinking, Speaking, Searching, Loading, Muted,
+
+    /** The box is down. Dims and freezes the orb, as [Muted] does. */
+    Offline,
+
+    /** The box is up but has shut the door on a caller's token. The same look as [Offline], kept apart so callers say which. */
+    Unauthorized,
+}
 
 /** The renderer's audio band count (the AAR keeps its spec internal). */
 private const val AUDIO_BANDS = 16
@@ -33,7 +45,42 @@ private fun OrbState.mode(): OrbMode = when (this) {
     OrbState.Speaking -> OrbMode.SPEAKING
     OrbState.Searching -> OrbMode.TOOL_CALL
     OrbState.Loading -> OrbMode.LOADING
-    OrbState.Muted -> OrbMode.OFFLINE
+    OrbState.Muted, OrbState.Offline, OrbState.Unauthorized -> OrbMode.OFFLINE
+}
+
+/**
+ * A substrate slot's mode as the renderer's: the server's first nine modes mirror [OrbMode] one for
+ * one. `unauthorized` has no mode of its own and must not fall to idle (what [OrbMode.fromWireName]
+ * would do), so it dims like offline; a mode this build does not know draws as processing, busy
+ * without a claim about what.
+ */
+private fun SubstrateMode.orbMode(): OrbMode = when (this) {
+    SubstrateMode.Idle -> OrbMode.IDLE
+    SubstrateMode.Listening -> OrbMode.LISTENING
+    SubstrateMode.Thinking -> OrbMode.THINKING
+    SubstrateMode.Processing, SubstrateMode.Unknown -> OrbMode.PROCESSING
+    SubstrateMode.Speaking -> OrbMode.SPEAKING
+    SubstrateMode.ToolCall -> OrbMode.TOOL_CALL
+    SubstrateMode.Loading -> OrbMode.LOADING
+    SubstrateMode.Offline, SubstrateMode.Unauthorized -> OrbMode.OFFLINE
+    SubstrateMode.Error -> OrbMode.ERROR
+}
+
+/**
+ * Draws either [box], every slot in its own lane (a lane keeps its colour for the life of its
+ * activity), or, with no box, [state] alone in lane 0. Always one call that replaces all the lanes,
+ * so nothing of the other drawing is left behind.
+ */
+private fun OrbController.draw(state: OrbState, box: BoxOrbState?) {
+    setProcesses(
+        if (box == null) {
+            listOf(OrbProcess(id = 0, mode = state.mode()))
+        } else {
+            box.drawable.map {
+                OrbProcess(id = it.slot, label = it.label ?: "Task ${it.slot + 1}", mode = it.mode.orbMode())
+            }
+        },
+    )
 }
 
 /** Dark ink on a light surface, light on a dark one, with [accent] leading the palette. */
@@ -62,11 +109,14 @@ fun NeuralOrb(
     glowIntensity: Float = 0.6f,
     externalAmplitude: (() -> Float?)? = null,
     failureSignal: Int = 0,
+    /** What the whole box is doing, drawn slot by slot in place of [state]; null draws [state] alone. */
+    box: BoxOrbState? = null,
 ) {
     val dark = isSystemInDarkTheme()
     val theme = remember(dark, accent) { themeFor(dark, accent) }
     val tuning = remember(theme, glowIntensity) { tuningFor(theme, glowIntensity) }
     val curState = rememberUpdatedState(state)
+    val curBox = rememberUpdatedState(box)
     val curExternal = rememberUpdatedState(externalAmplitude)
     val view = remember { arrayOfNulls<NeuralOrbView>(1) }
 
@@ -76,7 +126,7 @@ fun NeuralOrb(
         update = { orb ->
             orb.controller.setTheme(theme)
             orb.controller.setTuning(tuning)
-            orb.controller.setMode(state.mode())
+            orb.controller.draw(state, box)
         },
         onRelease = { it.dispose() },
     )
@@ -86,7 +136,7 @@ fun NeuralOrb(
         if (failureSignal == 0) return@LaunchedEffect
         view[0]?.controller?.setMode(OrbMode.ERROR)
         delay(900)
-        view[0]?.controller?.setMode(curState.value.mode())
+        view[0]?.controller?.draw(curState.value, curBox.value)
     }
 
     // The live level as audio bands, about 30 times a second.

@@ -1,5 +1,7 @@
 package app.lawnchair.nexus.net
 
+import app.lawnchair.nexus.box.SubstrateFrame
+import app.lawnchair.nexus.news.NewsFeed
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -57,6 +59,22 @@ interface NexusTransport {
         pcm16Chunks: Flow<ByteArray>,
         language: String? = null,
     ): Flow<TranscriptionEvent>
+
+    /**
+     * Subscribe to what the whole box is doing (`substrate.watch`): the slot table, one whole
+     * snapshot per frame, the first right away. Completes or throws when the stream is lost; the
+     * caller reconnects (see `boxOrbStates`).
+     */
+    fun watchBox(base: String, token: String): Flow<SubstrateFrame>
+
+    /** The news feed (`POST /news {"method":"feed","limit":n}`), newest first as the server orders it. */
+    suspend fun newsFeed(base: String, token: String, limit: Int): NewsFeed
+
+    /**
+     * Ask the server to sweep its news sources now and return the feed (`POST /news
+     * {"method":"refresh"}`). May take many seconds.
+     */
+    suspend fun newsRefresh(base: String, token: String): NewsFeed
 }
 
 /**
