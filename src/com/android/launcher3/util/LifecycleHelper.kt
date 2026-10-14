@@ -34,6 +34,16 @@ class LifecycleHelper(
 
     override fun onActivityPreCreated(activity: Activity, savedInstanceState: Bundle?) {
         savedStateRegistryController.performRestore(savedInstanceState)
+        // A relaunch (the system theme changing, say) hands the new activity the old one's
+        // window with its DecorView, tagged with the old, destroyed owner. Content set in
+        // onCreate attaches to that live window at once, so a ComposeView in it (the search
+        // bar) would build its recomposer on the destroyed lifecycle and never run. Point the
+        // preserved DecorView at this activity before onCreate; a fresh window has none yet and
+        // gets its owner in onActivityPostCreated, before anything attaches.
+        activity.window.peekDecorView()?.let { decor ->
+            decor.setViewTreeLifecycleOwner(owner)
+            decor.setViewTreeSavedStateRegistryOwner(owner)
+        }
     }
 
     override fun onActivityPostCreated(activity: Activity, savedInstanceState: Bundle?) {
