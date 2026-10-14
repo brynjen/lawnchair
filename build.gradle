@@ -572,6 +572,9 @@ licensee {
     // Google Play services libraries the (undrawn) Google sign-in plugin pulls in: Google's own
     // Android SDK terms.
     allowUrl("https://developer.android.com/studio/terms.html")
+    // SQLCipher (net.zetetic:sqlcipher-android, behind the app's saved copies): Zetetic's
+    // Community Edition license, a BSD-style one, named by URL rather than SPDX id.
+    allowUrl("https://www.zetetic.net/sqlcipher/license/")
     // The Nexus orb (no.nordli:neural-orb-android) declares MIT by SPDX id.
     allow(SpdxId.MIT)
     // The embedded Nexus app (`melos app:aar`): Flutter's engine and the plugin AARs that
@@ -588,8 +591,10 @@ licensee {
         'com.llfbandit.record',
         'com.ryanheise.audio_session',
         'com.ryanheise.just_audio',
-        // sqflite_sqlcipher backs the app's saved copies (SnapshotStore).
+        // sqflite_sqlcipher backs the app's saved copies (SnapshotStore); plain sqflite is
+        // still there for flutter_cache_manager's picture index.
         'com.davidmartos96.sqflite_sqlcipher',
+        'com.tekartik.sqflite',
         'dev.fluttercommunity.plus.connectivity',
         'no.nordli.neuralorb.flutter',
         'no.nordli.nexus.health.sync',
