@@ -152,7 +152,7 @@ private fun systemDark(context: android.content.Context): Boolean =
  * the person's theme), for the status bar.
  */
 @Composable
-fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}) {
+fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}, onDiscuss: (NewsItem) -> Unit = {}) {
     val context = LocalContext.current
     // Whether the Nexus app is signed in and set up, and whether it (or, on System, the phone) is
     // dark, re-read while the panel is open: signing in lets the news in, and a change of theme
@@ -197,7 +197,7 @@ fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}) {
                 } else {
                     // Everything the page holds (the feed, the search, the open article) is one person's
                     // on one server: signing out or in as someone else starts it over.
-                    key(gate.serverUrl, gate.authKey) { NewsPanel(gate.serverUrl, gate.authKey, onClose) }
+                    key(gate.serverUrl, gate.authKey) { NewsPanel(gate.serverUrl, gate.authKey, onClose, onDiscuss) }
                 }
             }
         }
@@ -205,7 +205,7 @@ fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}) {
 }
 
 @Composable
-private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit) {
+private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, onDiscuss: (NewsItem) -> Unit) {
     var query by remember { mutableStateOf("") }
     var activeTag by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf<NewsItem?>(null) }
@@ -247,7 +247,7 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit) {
 
     val article = selected
     if (article != null) {
-        DetailsScreen(article, now, pictures, onBack = { selected = null })
+        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss)
     } else {
         ListScreen(
             items = feed?.items,
@@ -660,7 +660,13 @@ private fun FigureChip(figure: NewsFigure, modifier: Modifier = Modifier) {
  * the column to a readable width.
  */
 @Composable
-private fun DetailsScreen(article: NewsItem, now: Instant, pictures: NewsPictures, onBack: () -> Unit) {
+private fun DetailsScreen(
+    article: NewsItem,
+    now: Instant,
+    pictures: NewsPictures,
+    onBack: () -> Unit,
+    onDiscuss: (NewsItem) -> Unit,
+) {
     val context = LocalContext.current
     val paper = article.kind == NewsKind.Paper
     var heroMissing by remember(article.id) { mutableStateOf(false) }
@@ -720,6 +726,22 @@ private fun DetailsScreen(article: NewsItem, now: Instant, pictures: NewsPicture
                     Spacer(Modifier.height(18.dp))
                     if (paper) SectionHeading("Summary")
                     Text(article.synopsis, style = TextStyle(color = TextC, fontSize = 17.sp, lineHeight = 26.sp))
+                }
+
+                Spacer(Modifier.height(20.dp))
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(Accent)
+                        .clickable { onDiscuss(article) }
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        if (paper) "Discuss this paper" else "Discuss with Nexus",
+                        style = TextStyle(color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                    )
                 }
 
                 if (article.keyPoints.isNotEmpty()) {

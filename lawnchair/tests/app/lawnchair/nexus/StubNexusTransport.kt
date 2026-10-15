@@ -2,6 +2,7 @@ package app.lawnchair.nexus
 
 import app.lawnchair.nexus.box.SubstrateFrame
 import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.net.NexusTurnEvent
 import app.lawnchair.nexus.net.TranscriptionEvent
@@ -9,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 
 /** A [NexusTransport] for tests that need one or two calls: everything not overridden fails loudly. */
 open class StubNexusTransport : NexusTransport {
-    override suspend fun createConversation(base: String, token: String): Int = unused()
+    override suspend fun createConversation(base: String, token: String, subject: ChatSubject?): Int = unused()
 
     override suspend fun submitTurn(
         base: String,
@@ -17,6 +18,7 @@ open class StubNexusTransport : NexusTransport {
         conversationId: Int,
         userText: String,
         turnId: String,
+        voice: Boolean?,
     ) = unused()
 
     override suspend fun answerUserPrompt(

@@ -44,7 +44,7 @@ class FakeNexusTransport(
     private val failMidway: Boolean = false,
 ) : NexusTransport {
 
-    override suspend fun createConversation(base: String, token: String): Int {
+    override suspend fun createConversation(base: String, token: String, subject: ChatSubject?): Int {
         delay(100)
         return 1
     }
@@ -55,6 +55,7 @@ class FakeNexusTransport(
         conversationId: Int,
         userText: String,
         turnId: String,
+        voice: Boolean?,
     ) {
         // No-op: the scripted streamTurn drives the reply.
         Log.d(TAG, "submitTurn: \"$userText\" (turn=$turnId)")

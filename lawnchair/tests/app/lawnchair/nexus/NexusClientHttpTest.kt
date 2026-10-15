@@ -1,5 +1,6 @@
 package app.lawnchair.nexus
 
+import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusUnauthorizedException
 import java.io.ByteArrayOutputStream
@@ -13,6 +14,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -127,5 +129,54 @@ class NexusClientHttpTest {
             fail("an unreadable feed must throw")
         } catch (_: IOException) {
         }
+    }
+
+    @Test
+    fun `an ordinary conversation has a null title and no subject`() {
+        val seen = LinkedBlockingQueue<Seen>()
+        val base = serve(200, "41".toByteArray(), seen)
+
+        val id = runBlocking { NexusClient().createConversation(base, "session-key") }
+
+        assertEquals(41, id)
+        val request = seen.poll(5, TimeUnit.SECONDS)!!
+        assertEquals("POST /voiceSquad HTTP/1.1", request.line)
+        val body = JSONObject(request.body)
+        assertEquals("createConversation", body.getString("method"))
+        assertTrue(body.isNull("title"))
+        assertFalse(body.has("subjectKind"))
+        assertFalse(body.has("subjectId"))
+    }
+
+    @Test
+    fun `a conversation about an article names it and takes its title`() {
+        val seen = LinkedBlockingQueue<Seen>()
+        val base = serve(200, "42".toByteArray(), seen)
+
+        val id = runBlocking {
+            NexusClient().createConversation(base, "k", ChatSubject("news", 1234L, "Regjeringen la fram budsjettet"))
+        }
+
+        assertEquals(42, id)
+        val body = JSONObject(seen.poll(5, TimeUnit.SECONDS)!!.body)
+        assertEquals("createConversation", body.getString("method"))
+        assertEquals("Regjeringen la fram budsjettet", body.getString("title"))
+        assertEquals("news", body.getString("subjectKind"))
+        assertEquals(1234L, body.getLong("subjectId"))
+    }
+
+    @Test
+    fun `a turn says nothing of voice unless it is asked to be text`() {
+        val plain = LinkedBlockingQueue<Seen>()
+        runBlocking { NexusClient().submitTurn(serve(200, ByteArray(0), plain), "k", 7, "Hei", "turn-1") }
+        val unsaid = JSONObject(plain.poll(5, TimeUnit.SECONDS)!!.body)
+        assertEquals("submitTurn", unsaid.getString("method"))
+        assertEquals(7, unsaid.getInt("conversationId"))
+        assertFalse("the server decides", unsaid.has("voice"))
+
+        val text = LinkedBlockingQueue<Seen>()
+        runBlocking { NexusClient().submitTurn(serve(200, ByteArray(0), text), "k", 7, "Hei", "turn-2", voice = false) }
+        val said = JSONObject(text.poll(5, TimeUnit.SECONDS)!!.body)
+        assertFalse(said.getBoolean("voice"))
     }
 }

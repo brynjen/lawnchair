@@ -6,6 +6,8 @@ import android.view.ViewGroup
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import app.lawnchair.LawnchairLauncher
+import app.lawnchair.nexus.chat.NexusChatOverlay
+import app.lawnchair.nexus.net.ChatSubject
 import com.android.launcher3.InsettableFrameLayout
 import com.android.systemui.plugins.shared.LauncherOverlayManager
 import com.android.systemui.plugins.shared.LauncherOverlayManager.LauncherOverlay
@@ -68,6 +70,9 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
                     onDark = {
                         panelDark = it
                         applyStatusBar()
+                    },
+                    onDiscuss = { article ->
+                        NexusChatOverlay.openText(launcher, ChatSubject("news", article.id, article.title))
                     },
                 )
             }

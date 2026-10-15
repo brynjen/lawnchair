@@ -3,6 +3,7 @@ package app.lawnchair.nexus.chat
 import app.lawnchair.nexus.box.BoxOrbState
 import app.lawnchair.nexus.box.boxOrbStates
 import app.lawnchair.nexus.net.AudioSegment
+import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusSource
 import app.lawnchair.nexus.net.NexusTransport
@@ -70,6 +71,8 @@ class NexusChatController(
     private val token: String,
     initialMode: Mode,
     initialGesture: MicGesture = MicGesture.None,
+    /** The article this conversation is about, when it was opened from the News page. */
+    val subject: ChatSubject? = null,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -244,7 +247,7 @@ class NexusChatController(
                         scope.launch {
                             // The RPC stays open for the whole turn; only a real failure (401,
                             // 500, no network) is news. Swallowing it left the UI on Thinking.
-                            runCatching { transport.submitTurn(serverUrl, token, cid, text, turnId) }
+                            runCatching { transport.submitTurn(serverUrl, token, cid, text, turnId, voice = if (subject != null) false else null) }
                                 .onFailure { e ->
                                     if (e !is CancellationException && currentTurnId == turnId) {
                                         fail(describe(e, "Couldn't send to Nexus"))
@@ -370,7 +373,7 @@ class NexusChatController(
 
     private suspend fun ensureConversation(): Int? {
         conversationId?.let { return it }
-        return runCatching { transport.createConversation(serverUrl, token) }
+        return runCatching { transport.createConversation(serverUrl, token, subject) }
             .getOrNull()
             ?.also { conversationId = it }
     }

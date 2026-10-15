@@ -68,35 +68,36 @@ class NexusClient(
         )
     }.getOrNull()
 
-    /** `POST /voiceSquad {"method":"createConversation","title":null}` → conversation id. */
-    override suspend fun createConversation(base: String, token: String): Int {
-        val body = post(
-            base,
-            "/voiceSquad",
-            token,
-            JSONObject().put("method", "createConversation").put("title", JSONObject.NULL),
-        )
-        return body.trim().toInt()
+    /**
+     * `POST /voiceSquad {"method":"createConversation","title":null}` → conversation id. With a
+     * [subject] the title is the article's and `subjectKind`/`subjectId` name it.
+     */
+    override suspend fun createConversation(base: String, token: String, subject: ChatSubject?): Int {
+        val request = JSONObject().put("method", "createConversation")
+        if (subject == null) {
+            request.put("title", JSONObject.NULL)
+        } else {
+            request.put("title", subject.title).put("subjectKind", subject.kind).put("subjectId", subject.id)
+        }
+        return post(base, "/voiceSquad", token, request).trim().toInt()
     }
 
-    /** `POST /voiceSquad {conversationId, userText, turnId, method:"submitTurn"}` → void. */
+    /** `POST /voiceSquad {conversationId, userText, turnId, voice?, method:"submitTurn"}` → void. */
     override suspend fun submitTurn(
         base: String,
         token: String,
         conversationId: Int,
         userText: String,
         turnId: String,
+        voice: Boolean?,
     ) {
-        post(
-            base,
-            "/voiceSquad",
-            token,
-            JSONObject()
-                .put("conversationId", conversationId)
-                .put("userText", userText)
-                .put("turnId", turnId)
-                .put("method", "submitTurn"),
-        )
+        val request = JSONObject()
+            .put("conversationId", conversationId)
+            .put("userText", userText)
+            .put("turnId", turnId)
+            .put("method", "submitTurn")
+        if (voice != null) request.put("voice", voice)
+        post(base, "/voiceSquad", token, request)
     }
 
     /** `POST /voiceSquad {conversationId, promptId, answer, method:"answerUserPrompt"}` → void. */

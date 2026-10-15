@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.NexusLockNudge
+import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.FakeNexusTransport
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusTransport
@@ -32,7 +33,7 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
     private var backCallback: Any? = null
     private var prevSoftInputMode: Int? = null
 
-    private fun show(mode: Mode, serverUrl: String, token: String, gesture: MicGesture) {
+    private fun show(mode: Mode, serverUrl: String, token: String, gesture: MicGesture, subject: ChatSubject? = null) {
         if (panel != null) return
         val parent = (launcher.dragLayer?.parent as? ViewGroup) ?: launcher.dragLayer ?: return
 
@@ -44,7 +45,7 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
         // └─────────────────────────────────────────────────────────────────────────────────────┘
         val transport: NexusTransport =
             if (USE_MOCK || simulate || serverUrl == MOCK_URL) FakeNexusTransport() else NexusClient()
-        val ctrl = NexusChatController(transport, serverUrl, token, mode, gesture)
+        val ctrl = NexusChatController(transport, serverUrl, token, mode, gesture, subject)
         controller = ctrl
 
         // Read the status-bar height synchronously from the (already-attached) parent so the
@@ -138,10 +139,13 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
         @JvmField
         var simulate: Boolean = false
 
-        /** Tap on the pill's text area → Text mode. */
-        fun openText(launcher: LawnchairLauncher) {
+        /**
+         * Tap on the pill's text area → Text mode. With a [subject] the conversation is about that
+         * News article (the Discuss button): the server reads it to the lead and answers in text.
+         */
+        fun openText(launcher: LawnchairLauncher, subject: ChatSubject? = null) {
             val (url, token) = resolveOrNudge(launcher) ?: return
-            NexusChatOverlay(launcher).show(Mode.Text, url, token, MicGesture.None)
+            NexusChatOverlay(launcher).show(Mode.Text, url, token, MicGesture.None, subject)
         }
 
         /**

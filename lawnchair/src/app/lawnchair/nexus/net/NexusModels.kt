@@ -158,3 +158,10 @@ data class AudioSegment(
         return result
     }
 }
+
+/**
+ * What a conversation is about, when it is opened from a piece of reading: [kind] `"news"` and
+ * [id] the News card's id (the server's `news_item.id`). The server puts that article's text in
+ * front of the lead and answers in text; [title] is the conversation's own title.
+ */
+data class ChatSubject(val kind: String, val id: Long, val title: String)

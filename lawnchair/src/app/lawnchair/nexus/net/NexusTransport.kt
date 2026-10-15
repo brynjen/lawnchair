@@ -15,15 +15,24 @@ import kotlinx.coroutines.flow.Flow
  */
 interface NexusTransport {
 
-    /** Create a conversation and return its id. */
-    suspend fun createConversation(base: String, token: String): Int
+    /** Create a conversation and return its id; with a [subject] it is about that article. */
+    suspend fun createConversation(base: String, token: String, subject: ChatSubject? = null): Int
 
     /**
      * Fire the LLM turn. Fire-and-forget by contract: the server blocks for the whole LLM+TTS
      * pipeline (well past the ~20s RPC timeout), so callers must not await completion here — drive
-     * completion off [streamTurn] instead. [turnId] correlates the resulting stream events.
+     * completion off [streamTurn] instead. [turnId] correlates the resulting stream events. [voice]
+     * false asks for a text reply with no speech; null leaves it to the server (voice, except in a
+     * conversation about an article).
      */
-    suspend fun submitTurn(base: String, token: String, conversationId: Int, userText: String, turnId: String)
+    suspend fun submitTurn(
+        base: String,
+        token: String,
+        conversationId: Int,
+        userText: String,
+        turnId: String,
+        voice: Boolean? = null,
+    )
 
     /**
      * Answer the question an [NexusTurnEvent.UserPrompt] asked. The waiting turn resumes on the

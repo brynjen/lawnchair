@@ -311,7 +311,10 @@ private fun Conversation(
         ) {
             if (state.messages.isEmpty() && state.userTranscript.isEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                BasicText(text = "Ask Nexus anything.", style = TextStyle(color = Text3, fontSize = 15.sp))
+                BasicText(
+                    text = controller.subject?.let { "Ask about “${it.title}”." } ?: "Ask Nexus anything.",
+                    style = TextStyle(color = Text3, fontSize = 15.sp),
+                )
             }
             state.messages.forEach { line ->
                 if (line.imageUrl != null) ImageBubble(line.imageUrl, controller) else MessageBubble(line)
