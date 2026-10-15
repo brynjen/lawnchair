@@ -143,9 +143,13 @@ class NexusClient(
         }
     }
 
-    /** `POST /news {"method":"feed","limit":n}` → the server's `NewsFeed`; a 401 is a [NexusUnauthorizedException]. */
-    override suspend fun newsFeed(base: String, token: String, limit: Int): NewsFeed =
-        readNews(post(base, "/news", token, JSONObject().put("method", "feed").put("limit", limit)))
+    /** `POST /news {"method":"feed","limit":n,"cursor"?,"section"?}` → the server's `NewsFeed`; a 401 is a [NexusUnauthorizedException]. */
+    override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?): NewsFeed {
+        val request = JSONObject().put("method", "feed").put("limit", limit)
+        if (cursor != null) request.put("cursor", cursor)
+        if (section != null) request.put("section", section)
+        return readNews(post(base, "/news", token, request))
+    }
 
     /** `POST /news {"method":"refresh"}` → a sweep of the sources, then the same `NewsFeed`. Slow. */
     override suspend fun newsRefresh(base: String, token: String): NewsFeed =

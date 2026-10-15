@@ -179,4 +179,22 @@ class NexusClientHttpTest {
         val said = JSONObject(text.poll(5, TimeUnit.SECONDS)!!.body)
         assertFalse(said.getBoolean("voice"))
     }
+
+    @Test
+    fun `a section and a cursor go with the feed call, and only when they are asked for`() {
+        val plain = LinkedBlockingQueue<Seen>()
+        runBlocking { NexusClient().newsFeed(serve(200, feedJson.toByteArray(), plain), "k", 50) }
+        val unasked = JSONObject(plain.poll(5, TimeUnit.SECONDS)!!.body)
+        assertFalse(unasked.has("section"))
+        assertFalse(unasked.has("cursor"))
+
+        val paged = LinkedBlockingQueue<Seen>()
+        runBlocking {
+            NexusClient().newsFeed(serve(200, feedJson.toByteArray(), paged), "k", 50, cursor = "2026-10-14T06:00:00.000Z|8", section = "papers")
+        }
+        val asked = JSONObject(paged.poll(5, TimeUnit.SECONDS)!!.body)
+        assertEquals("papers", asked.getString("section"))
+        assertEquals("2026-10-14T06:00:00.000Z|8", asked.getString("cursor"))
+        assertEquals(50, asked.getInt("limit"))
+    }
 }

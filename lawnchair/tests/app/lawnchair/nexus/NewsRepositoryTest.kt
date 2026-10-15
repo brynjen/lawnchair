@@ -100,7 +100,24 @@ class NewsRepositoryTest {
 
     // endregion
 
-    // region the repository
+    @Test
+    fun `each section has its own file, and the files of another person go`() {
+        val cache = NewsCache(tmp.root)
+        assertNotEquals(cache.fileFor(url, key, "ai"), cache.fileFor(url, key, "papers"))
+        assertNotEquals(cache.fileFor(url, key), cache.fileFor(url, key, "ai"))
+        assertEquals(cache.fileFor(url, key), cache.fileFor(url, key, null))
+
+        cache.write(url, "old-key", feed(1), "now")
+        cache.write(url, key, feed(2), "now")
+        cache.write(url, key, feed(3), "ai")
+        assertEquals(feed(2), cache.read(url, key, "now"))
+        assertEquals(feed(3), cache.read(url, key, "ai"))
+        assertNull(cache.read(url, key, "papers"))
+        assertNull(cache.read(url, "old-key", "now"))
+        assertEquals(2, tmp.root.list()!!.size)
+    }
+
+        // region the repository
 
     /** A transport that answers the two news calls from [onFeed] and [onRefresh]; the rest is not used here. */
     private class News(
@@ -110,8 +127,12 @@ class NewsRepositoryTest {
         var feedCalls = 0
         var refreshCalls = 0
 
-        override suspend fun newsFeed(base: String, token: String, limit: Int): NewsFeed {
+        /** The (section, cursor) of each feed call. */
+        val asked = mutableListOf<Pair<String?, String?>>()
+
+        override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?): NewsFeed {
             feedCalls++
+            asked += section to cursor
             return onFeed()
         }
 
@@ -237,4 +258,46 @@ class NewsRepositoryTest {
     // endregion
 
     // endregion
+
+    @Test
+    fun `a section is asked for and saved by itself`() = runBlocking {
+        val transport = News(onFeed = { feed(5, 6) })
+        val repo = repository(transport)
+
+        assertEquals(feed(5, 6), repo.load("papers"))
+        assertEquals(listOf<Pair<String?, String?>>("papers" to null), transport.asked)
+        assertEquals(feed(5, 6), repo.saved("papers"))
+        assertNull(repo.saved("ai"))
+        assertNull(repo.saved())
+    }
+
+    @Test
+    fun `the next page is asked for by its cursor and is not saved over the first`() = runBlocking {
+        val transport = News(onFeed = { feed(7) })
+        NewsCache(tmp.root).write(url, key, feed(1, 2), "ai")
+        val repo = repository(transport)
+
+        assertEquals(feed(7), repo.more("ai", "cursor-1"))
+        assertEquals(listOf<Pair<String?, String?>>("ai" to "cursor-1"), transport.asked)
+        assertEquals(feed(1, 2), repo.saved("ai"))
+    }
+
+    @Test
+    fun `a page that cannot be had is nothing, not an error`() = runBlocking {
+        assertNull(repository(News(onFeed = { throw IOException("down") })).more("ai", "c"))
+    }
+
+    @Test
+    fun `a section whose load fails after a sweep does not take the sweep's page of everything`() = runBlocking {
+        var loads = 0
+        val transport = News(
+            onFeed = { if (loads++ == 0) throw IOException("down") else feed(1) },
+            onRefresh = { feed(8, 9) },
+        )
+        val repo = repository(transport)
+
+        assertEquals(RefreshResult.Unreachable, repo.sweep(shown = null, section = "papers"))
+        assertNull(repo.saved("papers"))
+        assertEquals(RefreshResult.New(feed(8, 9), 2), repository(News(onFeed = { throw IOException("down") }, onRefresh = { feed(8, 9) })).sweep(shown = null))
+    }
 }

@@ -76,8 +76,12 @@ interface NexusTransport {
      */
     fun watchBox(base: String, token: String): Flow<SubstrateFrame>
 
-    /** The news feed (`POST /news {"method":"feed","limit":n}`), newest first as the server orders it. */
-    suspend fun newsFeed(base: String, token: String, limit: Int): NewsFeed
+    /**
+     * The news feed (`POST /news {"method":"feed","limit":n}`), newest first as the server orders it.
+     * [section] is `now`, `ai` or `papers` (none: everything); [cursor] is a page's `nextCursor`, for
+     * the page after it.
+     */
+    suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String? = null, section: String? = null): NewsFeed
 
     /**
      * Ask the server to sweep its news sources now and return the feed (`POST /news

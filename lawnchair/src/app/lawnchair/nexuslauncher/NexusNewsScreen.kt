@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
@@ -83,11 +84,17 @@ import app.lawnchair.nexus.NexusLock
 import app.lawnchair.nexus.NexusLockNudge
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.news.NewsCache
+import app.lawnchair.nexus.news.NewsClaim
 import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsImageCache
 import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.news.NewsKind
+import app.lawnchair.nexus.news.NewsSection
+import app.lawnchair.nexus.news.authorLine
+import app.lawnchair.nexus.news.compactCount
+import app.lawnchair.nexus.news.matches
+import app.lawnchair.nexus.news.plus
 import app.lawnchair.nexus.news.NewsPictures
 import app.lawnchair.nexus.news.RefreshResult
 import app.lawnchair.nexus.news.message
@@ -208,6 +215,8 @@ fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}, onDiscu
 private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, onDiscuss: (NewsItem) -> Unit) {
     var query by remember { mutableStateOf("") }
     var activeTag by remember { mutableStateOf<String?>(null) }
+    var section by remember { mutableStateOf(NewsSection.Now) }
+    var loadingMore by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<NewsItem?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     // What the last pull-to-refresh came to, said for a few seconds under the tag row.
@@ -230,10 +239,11 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
 
     // The saved copy first, so the page is never blank while the server answers; then the server,
     // again every NEWS_REFRESH_MS. A failed read leaves what is shown as it is.
-    LaunchedEffect(news) {
-        feed = news.saved()
+    LaunchedEffect(news, section) {
+        activeTag = null
+        feed = news.saved(section.wire)
         while (true) {
-            feed = news.load() ?: feed ?: NewsFeed.EMPTY
+            feed = news.load(section.wire) ?: feed ?: NewsFeed.EMPTY
             delay(NEWS_REFRESH_MS)
         }
     }
@@ -263,7 +273,7 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
             onRefresh = {
                 scope.launch {
                     refreshing = true
-                    val result = news.sweep(feed)
+                    val result = news.sweep(feed, section.wire)
                     feed = when (result) {
                         is RefreshResult.New -> result.feed
                         is RefreshResult.UpToDate -> result.feed
@@ -272,6 +282,23 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
                     refreshing = false
                     note = RefreshNote(result.message(), problem = result is RefreshResult.Unreachable)
                     noteVisible = true
+                }
+            },
+            section = section,
+            onSection = { section = it },
+            canLoadMore = feed?.nextCursor != null,
+            loadingMore = loadingMore,
+            onLoadMore = {
+                val shown = feed
+                val cursor = shown?.nextCursor
+                if (shown != null && cursor != null && !loadingMore) {
+                    scope.launch {
+                        loadingMore = true
+                        val more = news.more(section.wire, cursor)
+                        // A section changed meanwhile: that page is not for what is shown now.
+                        if (feed === shown) feed = more?.let { shown.plus(it) } ?: shown
+                        loadingMore = false
+                    }
                 }
             },
             onOpen = { selected = it },
@@ -339,6 +366,11 @@ private fun ListScreen(
     note: RefreshNote?,
     noteVisible: Boolean,
     onRefresh: () -> Unit,
+    section: NewsSection,
+    onSection: (NewsSection) -> Unit,
+    canLoadMore: Boolean,
+    loadingMore: Boolean,
+    onLoadMore: () -> Unit,
     onOpen: (NewsItem) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -346,10 +378,7 @@ private fun ListScreen(
     // A tag the latest feed no longer carries is no filter at all.
     val tag = activeTag?.takeIf { it in tags }
     val filtered = items.orEmpty().filter { a ->
-        (tag == null || a.tags.contains(tag)) &&
-            (query.isBlank() ||
-                a.title.contains(query, true) ||
-                a.synopsis.contains(query, true))
+        (tag == null || a.tags.contains(tag)) && a.matches(query)
     }
 
     Column(
@@ -362,6 +391,8 @@ private fun ListScreen(
         Header(refreshing || items == null)
         SearchField(query, onQuery)
         Spacer(Modifier.height(12.dp))
+        SectionRow(section, onSection)
+        Spacer(Modifier.height(10.dp))
         TagRow(tags, tag, onTag)
         Spacer(Modifier.height(8.dp))
         // The note floats over the top of the list, so it never pushes a card down.
@@ -382,9 +413,12 @@ private fun ListScreen(
                             Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                                 Text(
                                     if (query.isBlank()) {
-                                        "No news right now.\nPull down to refresh."
+                                        when (section) {
+                                            NewsSection.Papers -> "No papers yet.\nThe box reads them overnight."
+                                            else -> "No news right now.\nPull down to refresh."
+                                        }
                                     } else {
-                                        "No news matches \"$query\"."
+                                        "Nothing matches \"$query\"."
                                     },
                                     style = TextStyle(color = Text3, fontSize = 15.sp),
                                 )
@@ -392,6 +426,18 @@ private fun ListScreen(
                         }
                     }
                     items(filtered, key = { it.id }) { NewsCard(it, now, pictures, query) { onOpen(it) } }
+                    if (canLoadMore) {
+                        item(key = "more") {
+                            // Composed only when the list reaches its end: that asks for the next page.
+                            LaunchedEffect(Unit) { onLoadMore() }
+                            Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                                Text(
+                                    if (loadingMore) "Loading more…" else "",
+                                    style = TextStyle(color = Text3, fontSize = 13.sp),
+                                )
+                            }
+                        }
+                    }
                 }
             }
             // Fades in and out; the last note is kept while it fades.
@@ -513,6 +559,40 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit) {
     }
 }
 
+/** The sections as three tabs: the chosen one in ink with an underline, the others quiet. */
+@Composable
+private fun SectionRow(section: NewsSection, onSelect: (NewsSection) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+        NewsSection.entries.forEach { entry ->
+            val selected = entry == section
+            Column(
+                Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onSelect(entry) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    entry.label,
+                    style = TextStyle(
+                        color = if (selected) TextC else Text3,
+                        fontSize = 16.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                    ),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                Box(
+                    Modifier
+                        .height(2.dp)
+                        .width(24.dp)
+                        .clip(RoundedCornerShape(99.dp))
+                        .background(if (selected) Accent else Color.Transparent),
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TagRow(tags: List<String>, activeTag: String?, onSelect: (String?) -> Unit) {
     LazyRow(
@@ -560,7 +640,9 @@ private fun NewsItem.metaLine(now: Instant, kindColor: Color): AnnotatedString =
     withStyle(SpanStyle(color = kindColor, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp)) {
         append(kind.label())
     }
-    val rest = listOf(sourceName.uppercase(), agoText(publishedAt, now)).filter { it.isNotBlank() }
+    // A paper is placed by its arXiv class ("CS.LG"), an article by its source.
+    val where = if (kind == NewsKind.Paper && categories.isNotEmpty()) categories.first().uppercase() else sourceName.uppercase()
+    val rest = listOf(where, agoText(publishedAt, now)).filter { it.isNotBlank() }
     if (rest.isNotEmpty()) append("  ·  " + rest.joinToString("  ·  "))
 }
 
@@ -609,6 +691,15 @@ private fun NewsCard(article: NewsItem, now: Instant, pictures: NewsPictures, qu
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(color = TextC, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
             )
+            if (article.kind == NewsKind.Paper && article.authors.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    article.authorLine(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(color = Text3, fontSize = 12.sp),
+                )
+            }
             if (article.synopsis.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -618,14 +709,50 @@ private fun NewsCard(article: NewsItem, now: Instant, pictures: NewsPictures, qu
                     style = TextStyle(color = Text2, fontSize = 13.sp, lineHeight = 19.sp),
                 )
             }
-            if (article.figures.isNotEmpty()) {
+            if (article.kind == NewsKind.Paper) {
+                val badges = article.upvotes > 0 || article.codeUrl != null
+                if (badges || article.figures.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (article.upvotes > 0) Badge("▲ ${article.upvotes}")
+                        if (article.codeUrl != null) {
+                            Badge("Code" + (article.codeStars?.let { " ★ ${compactCount(it)}" } ?: ""))
+                        }
+                        article.figures.take(if (badges) 1 else 2).forEach { FigureChip(it, Modifier.weight(1f, fill = false)) }
+                    }
+                }
+            } else if (article.figures.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     article.figures.take(2).forEach { FigureChip(it, Modifier.weight(1f, fill = false)) }
                 }
             }
+            if (article.alsoIn.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Also in " + article.alsoIn.joinToString(", "),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(color = Text3, fontSize = 11.sp),
+                )
+            }
         }
     }
+}
+
+/** A small fact about a paper ("▲ 51", "Code ★ 1.2k"), in the shape of a figure chip. */
+@Composable
+private fun Badge(text: String) {
+    val shape = RoundedCornerShape(99.dp)
+    Text(
+        text,
+        maxLines = 1,
+        style = TextStyle(color = AccentInk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+        modifier = Modifier
+            .clip(shape)
+            .background(LocalNexusColors.current.accentSoft)
+            .padding(horizontal = 9.dp, vertical = 4.dp),
+    )
 }
 
 /** A number the article states, compact: "14%  accuracy against the baseline", the label cut to fit. */
@@ -722,6 +849,21 @@ private fun DetailsScreen(
                     style = TextStyle(color = TextC, fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
                 )
 
+                if (paper && article.authors.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        article.authors.take(8).joinToString(", ") + if (article.authors.size > 8) " et al." else "",
+                        style = TextStyle(color = Text2, fontSize = 14.sp, lineHeight = 20.sp),
+                    )
+                }
+                if (paper && (article.categories.isNotEmpty() || article.upvotes > 0 || article.codeUrl != null)) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        article.categories.take(3).forEach { Badge(it) }
+                        if (article.upvotes > 0) Badge("▲ ${article.upvotes}")
+                    }
+                }
+
                 if (article.synopsis.isNotBlank()) {
                     Spacer(Modifier.height(18.dp))
                     if (paper) SectionHeading("Summary")
@@ -749,6 +891,14 @@ private fun DetailsScreen(
                     SectionHeading("Key points")
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         article.keyPoints.forEach { KeyPoint(it) }
+                    }
+                }
+
+                if (paper && article.claims.isNotEmpty()) {
+                    Spacer(Modifier.height(SECTION_GAP))
+                    SectionHeading("Claims")
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        article.claims.forEachIndexed { i, claim -> ClaimRow(i + 1, claim) }
                     }
                 }
 
@@ -786,6 +936,30 @@ private fun DetailsScreen(
                             "Open original  ↗",
                             style = TextStyle(color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.Medium),
                         )
+                    }
+                    if (article.codeUrl != null) {
+                        Spacer(Modifier.height(10.dp))
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(99.dp))
+                                .border(1.dp, BorderC, RoundedCornerShape(99.dp))
+                                .clickable {
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(article.codeUrl))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }
+                                }
+                                .padding(horizontal = 20.dp, vertical = 14.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "Code" + (article.codeStars?.let { "  ★ ${compactCount(it)}" } ?: "") + "  ↗",
+                                style = TextStyle(color = TextC, fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                            )
+                        }
                     }
                     Spacer(Modifier.height(10.dp))
                     Text(article.url, style = TextStyle(color = Text3, fontSize = 12.sp))
@@ -833,6 +1007,25 @@ private fun KeyPoint(text: String) {
         Box(Modifier.padding(top = 9.dp).size(6.dp).clip(CircleShape).background(AccentInk))
         Spacer(Modifier.width(12.dp))
         Text(text, style = TextStyle(color = TextC, fontSize = 15.sp, lineHeight = 22.sp), modifier = Modifier.weight(1f))
+    }
+}
+
+/** One claim of a paper, numbered, with what the paper offers for it under it. */
+@Composable
+private fun ClaimRow(number: Int, claim: NewsClaim) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            "$number",
+            style = TextStyle(color = AccentInk, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+            modifier = Modifier.width(24.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(claim.claim, style = TextStyle(color = TextC, fontSize = 15.sp, lineHeight = 22.sp))
+            if (claim.evidence.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(claim.evidence, style = TextStyle(color = Text3, fontSize = 13.sp, lineHeight = 19.sp))
+            }
+        }
     }
 }
 

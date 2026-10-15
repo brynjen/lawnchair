@@ -19,24 +19,30 @@ import kotlinx.coroutines.withTimeoutOrNull
  */
 class NewsCache(private val dir: File) {
 
-    fun fileFor(serverUrl: String, authKey: String): File {
+    private fun stem(serverUrl: String, authKey: String): String {
         val digest = MessageDigest.getInstance("SHA-256").digest("$serverUrl\u0000$authKey".toByteArray())
-        return File(dir, PREFIX + digest.joinToString("") { "%02x".format(it) } + SUFFIX)
+        return PREFIX + digest.joinToString("") { "%02x".format(it) }
     }
 
-    fun read(serverUrl: String, authKey: String): NewsFeed? =
-        runCatching { parseNewsFeed(fileFor(serverUrl, authKey).readText()) }.getOrNull()
+    /** The file of this person's feed on this server; each [section] (`now`, `ai`, `papers`) has its own. */
+    fun fileFor(serverUrl: String, authKey: String, section: String? = null): File =
+        File(dir, stem(serverUrl, authKey) + (section?.let { "-$it" } ?: "") + SUFFIX)
 
-    fun write(serverUrl: String, authKey: String, feed: NewsFeed) {
+    fun read(serverUrl: String, authKey: String, section: String? = null): NewsFeed? =
+        runCatching { parseNewsFeed(fileFor(serverUrl, authKey, section).readText()) }.getOrNull()
+
+    fun write(serverUrl: String, authKey: String, feed: NewsFeed, section: String? = null) {
         runCatching {
             dir.mkdirs()
-            val file = fileFor(serverUrl, authKey)
+            val file = fileFor(serverUrl, authKey, section)
             // Through a temporary name, so a write cut short never replaces a good copy.
             val partial = File(dir, file.name + ".tmp")
             partial.writeText(feed.toJson())
             if (!partial.renameTo(file)) partial.delete()
+            // Anything of another server or person goes; the other sections of this one stay.
+            val mine = stem(serverUrl, authKey)
             dir.listFiles()
-                ?.filter { it.name.startsWith(PREFIX) && it.name != file.name }
+                ?.filter { it.name.startsWith(PREFIX) && !it.name.startsWith(mine) }
                 ?.forEach { it.delete() }
         }
     }
@@ -62,11 +68,20 @@ class NewsRepository(
 ) {
     private val calls = Mutex()
 
-    /** The saved copy for this server and person, or null. */
-    suspend fun saved(): NewsFeed? = withContext(Dispatchers.IO) { cache.read(serverUrl, authKey) }
+    /** The saved copy of [section] for this server and person, or null. */
+    suspend fun saved(section: String? = null): NewsFeed? =
+        withContext(Dispatchers.IO) { cache.read(serverUrl, authKey, section) }
 
-    /** The server's feed, saved; null when it could not be had. */
-    suspend fun load(): NewsFeed? = calls.withLock { fetch() }
+    /** The server's first page of [section], saved; null when it could not be had. */
+    suspend fun load(section: String? = null): NewsFeed? = calls.withLock { fetch(section) }
+
+    /**
+     * The page of [section] after [cursor] (a `nextCursor`), not saved: the saved copy is the first
+     * page. Null when it could not be had.
+     */
+    suspend fun more(section: String?, cursor: String): NewsFeed? = calls.withLock {
+        attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT, cursor, section) }
+    }
 
     /**
      * Asks the server to sweep its sources now (it may take many seconds), then loads the feed, and
@@ -74,15 +89,17 @@ class NewsRepository(
      * times out the feed is loaded anyway; if only the load fails the sweep's own answer, the same
      * shape, is used; if both fail the result is [RefreshResult.Unreachable] and the saved copy stays.
      */
-    suspend fun sweep(shown: NewsFeed?): RefreshResult = calls.withLock {
+    suspend fun sweep(shown: NewsFeed?, section: String? = null): RefreshResult = calls.withLock {
         val swept = attempt(SWEEP_TIMEOUT_MS) { transport.newsRefresh(serverUrl, authKey) }
-        refreshResult(shown, fetch() ?: swept?.also { save(it) })
+        // The sweep's own answer is the page of everything: it stands in only for that page.
+        refreshResult(shown, fetch(section) ?: if (section == null) swept?.also { save(it, null) } else null)
     }
 
-    private suspend fun fetch(): NewsFeed? =
-        attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT) }?.also { save(it) }
+    private suspend fun fetch(section: String?): NewsFeed? =
+        attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT, null, section) }?.also { save(it, section) }
 
-    private suspend fun save(feed: NewsFeed) = withContext(Dispatchers.IO) { cache.write(serverUrl, authKey, feed) }
+    private suspend fun save(feed: NewsFeed, section: String?) =
+        withContext(Dispatchers.IO) { cache.write(serverUrl, authKey, feed, section) }
 
     /** Null on any failure or when [timeoutMs] passes: the socket has no read timeout of its own. */
     private suspend fun attempt(timeoutMs: Long, call: suspend () -> NewsFeed): NewsFeed? =

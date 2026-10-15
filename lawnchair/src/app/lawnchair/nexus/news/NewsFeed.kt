@@ -30,6 +30,9 @@ enum class NewsKind(val wire: String) {
     }
 }
 
+/** One thing a paper claims, and what it offers for it ([evidence] is empty when it only asserts). */
+data class NewsClaim(val claim: String, val evidence: String)
+
 /** One number an article states: [value] as it writes it ("14%", "NOK 2.1 bn") and what it measures. */
 data class NewsFigure(val value: String, val label: String)
 
@@ -52,15 +55,29 @@ data class NewsItem(
     val figures: List<NewsFigure> = emptyList(),
     val imageUrl: String? = null,
     val imageGenerated: Boolean = false,
+    /** The other sources that carried the same story ("also in VG, NRK"). */
+    val alsoIn: List<String> = emptyList(),
+    /** A paper's authors, arXiv classes and id; empty / null for an article. */
+    val authors: List<String> = emptyList(),
+    val categories: List<String> = emptyList(),
+    val arxivId: String? = null,
+    /** Hugging Face's upvotes, and the paper's code repository with its stars. */
+    val upvotes: Int = 0,
+    val codeUrl: String? = null,
+    val codeStars: Int? = null,
+    val claims: List<NewsClaim> = emptyList(),
 )
 
 /**
  * The server's `NewsFeed`, the body of `POST /news` `feed` and `refresh`:
  * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags","kind",
- * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated"}],"refreshedAt"}`.
+ * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated","alsoIn":[str],
+ * "authors":[str],"categories":[str],"arxivId","upvotes","codeUrl","codeStars",
+ * "claims":[{"claim","evidence"}]}],"refreshedAt","nextCursor"}`. [NewsFeed.nextCursor] is where the
+ * next page starts, null on the last.
  * The same shape is what the on-device cache keeps ([toJson]), so one parser reads both.
  */
-data class NewsFeed(val items: List<NewsItem>, val refreshedAt: Instant?) {
+data class NewsFeed(val items: List<NewsItem>, val refreshedAt: Instant?, val nextCursor: String? = null) {
     companion object {
         val EMPTY = NewsFeed(emptyList(), null)
     }
@@ -78,6 +95,7 @@ fun parseNewsFeed(text: String): NewsFeed? {
     return NewsFeed(
         items = cards.mapNotNull { parseItem(it) }.distinctBy { it.id },
         refreshedAt = parseInstant(feed.text("refreshedAt")),
+        nextCursor = feed.text("nextCursor")?.takeIf { it.isNotBlank() },
     )
 }
 
@@ -102,7 +120,24 @@ private fun parseItem(element: JsonElement): NewsItem? {
         figures = (o["figures"] as? JsonArray).orEmpty().mapNotNull { parseFigure(it) },
         imageUrl = o.text("imageUrl")?.trim()?.takeIf { it.isNotEmpty() },
         imageGenerated = (o["imageGenerated"] as? JsonPrimitive)?.booleanOrNull ?: false,
+        alsoIn = o.strings("alsoIn"),
+        authors = o.strings("authors"),
+        categories = o.strings("categories"),
+        arxivId = o.text("arxivId")?.trim()?.takeIf { it.isNotEmpty() },
+        upvotes = (o["upvotes"] as? JsonPrimitive)?.longOrNull?.toInt() ?: 0,
+        codeUrl = o.text("codeUrl")?.trim()?.takeIf { it.startsWith("http") },
+        codeStars = (o["codeStars"] as? JsonPrimitive)?.longOrNull?.toInt(),
+        claims = (o["claims"] as? JsonArray).orEmpty().mapNotNull { parseClaim(it) },
     )
+}
+
+private fun JsonObject.strings(key: String): List<String> = (this[key] as? JsonArray).orEmpty()
+    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { t -> t.isNotEmpty() } }
+
+private fun parseClaim(element: JsonElement): NewsClaim? {
+    val o = element as? JsonObject ?: return null
+    val claim = o.text("claim")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return NewsClaim(claim, o.text("evidence")?.trim().orEmpty())
 }
 
 private fun parseFigure(element: JsonElement): NewsFigure? {
@@ -136,10 +171,26 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 }
                 put("imageUrl", item.imageUrl)
                 put("imageGenerated", item.imageGenerated)
+                putJsonArray("alsoIn") { item.alsoIn.forEach { add(JsonPrimitive(it)) } }
+                putJsonArray("authors") { item.authors.forEach { add(JsonPrimitive(it)) } }
+                putJsonArray("categories") { item.categories.forEach { add(JsonPrimitive(it)) } }
+                put("arxivId", item.arxivId)
+                put("upvotes", item.upvotes)
+                put("codeUrl", item.codeUrl)
+                put("codeStars", item.codeStars)
+                putJsonArray("claims") {
+                    item.claims.forEach { claim ->
+                        addJsonObject {
+                            put("claim", claim.claim)
+                            put("evidence", claim.evidence)
+                        }
+                    }
+                }
             }
         }
     }
     put("refreshedAt", refreshedAt?.toString())
+    put("nextCursor", nextCursor)
 }.toString()
 
 private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
