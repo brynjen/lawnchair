@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -94,6 +95,7 @@ import app.lawnchair.nexus.news.NewsSection
 import app.lawnchair.nexus.news.authorLine
 import app.lawnchair.nexus.news.compactCount
 import app.lawnchair.nexus.news.matches
+import app.lawnchair.nexus.news.quickQuestions
 import app.lawnchair.nexus.news.plus
 import app.lawnchair.nexus.news.NewsPictures
 import app.lawnchair.nexus.news.RefreshResult
@@ -159,7 +161,12 @@ private fun systemDark(context: android.content.Context): Boolean =
  * the person's theme), for the status bar.
  */
 @Composable
-fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}, onDiscuss: (NewsItem) -> Unit = {}) {
+fun NexusNewsScreen(
+    onClose: () -> Unit,
+    onDark: (Boolean) -> Unit = {},
+    onDiscuss: (NewsItem) -> Unit = {},
+    onAsk: (NewsItem, String) -> Unit = { _, _ -> },
+) {
     val context = LocalContext.current
     // Whether the Nexus app is signed in and set up, and whether it (or, on System, the phone) is
     // dark, re-read while the panel is open: signing in lets the news in, and a change of theme
@@ -204,7 +211,7 @@ fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}, onDiscu
                 } else {
                     // Everything the page holds (the feed, the search, the open article) is one person's
                     // on one server: signing out or in as someone else starts it over.
-                    key(gate.serverUrl, gate.authKey) { NewsPanel(gate.serverUrl, gate.authKey, onClose, onDiscuss) }
+                    key(gate.serverUrl, gate.authKey) { NewsPanel(gate.serverUrl, gate.authKey, onClose, onDiscuss, onAsk) }
                 }
             }
         }
@@ -212,7 +219,13 @@ fun NexusNewsScreen(onClose: () -> Unit, onDark: (Boolean) -> Unit = {}, onDiscu
 }
 
 @Composable
-private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, onDiscuss: (NewsItem) -> Unit) {
+private fun NewsPanel(
+    serverUrl: String,
+    authKey: String,
+    onClose: () -> Unit,
+    onDiscuss: (NewsItem) -> Unit,
+    onAsk: (NewsItem, String) -> Unit,
+) {
     var query by remember { mutableStateOf("") }
     var activeTag by remember { mutableStateOf<String?>(null) }
     var section by remember { mutableStateOf(NewsSection.Now) }
@@ -225,6 +238,9 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
     // Null only until the saved copy or the first answer; after that the page always has a feed to
     // show, an empty one when there is nothing saved and no network.
     var feed by remember { mutableStateOf<NewsFeed?>(null) }
+    // What the server found for the words in the search box (in everything it holds, not only the pages
+    // loaded here), and the words it was asked for. Null until it answers, or when it could not.
+    var found by remember { mutableStateOf<Pair<String, NewsFeed>?>(null) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val transport = remember { NexusClient() }
@@ -248,6 +264,21 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
         }
     }
 
+    // Another section is another search.
+    LaunchedEffect(section) { found = null }
+
+    // The server searches once the person has stopped typing; until it answers (or if it cannot) the
+    // page filters what it already holds.
+    LaunchedEffect(news, section, query) {
+        val words = query.trim()
+        if (words.isEmpty()) {
+            found = null
+            return@LaunchedEffect
+        }
+        delay(SEARCH_DEBOUNCE_MS)
+        news.search(section.wire, words)?.let { found = words to it }
+    }
+
     LaunchedEffect(note) {
         if (note != null) {
             delay(NOTE_MS)
@@ -257,10 +288,14 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
 
     val article = selected
     if (article != null) {
-        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss)
+        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss, onAsk = onAsk)
     } else {
+        // The server's answer to the words as they are now, if it has come.
+        val hits = found?.takeIf { (words, _) -> words == query.trim() }?.second
         ListScreen(
-            items = feed?.items,
+            items = (hits ?: feed)?.items,
+            serverHits = hits != null,
+            onDiscuss = onDiscuss,
             now = now,
             pictures = pictures,
             query = query,
@@ -286,17 +321,22 @@ private fun NewsPanel(serverUrl: String, authKey: String, onClose: () -> Unit, o
             },
             section = section,
             onSection = { section = it },
-            canLoadMore = feed?.nextCursor != null,
+            canLoadMore = (hits ?: feed)?.nextCursor != null,
             loadingMore = loadingMore,
             onLoadMore = {
-                val shown = feed
+                val searched = found?.takeIf { (words, _) -> words == query.trim() }
+                val shown = searched?.second ?: feed
                 val cursor = shown?.nextCursor
                 if (shown != null && cursor != null && !loadingMore) {
                     scope.launch {
                         loadingMore = true
-                        val more = news.more(section.wire, cursor)
-                        // A section changed meanwhile: that page is not for what is shown now.
-                        if (feed === shown) feed = more?.let { shown.plus(it) } ?: shown
+                        val more = news.more(section.wire, cursor, searched?.first)
+                        // A section or a search changed meanwhile: that page is not for what is shown now.
+                        if (searched != null) {
+                            if (found?.second === shown) found = searched.first to (more?.let { shown.plus(it) } ?: shown)
+                        } else if (feed === shown) {
+                            feed = more?.let { shown.plus(it) } ?: shown
+                        }
                         loadingMore = false
                     }
                 }
@@ -356,6 +396,9 @@ private fun LockedScreen(lock: NexusLock, onClose: () -> Unit) {
 @Composable
 private fun ListScreen(
     items: List<NewsItem>?,
+    /** [items] are the server's answer to [query]: they are not filtered again here. */
+    serverHits: Boolean,
+    onDiscuss: (NewsItem) -> Unit,
     now: Instant,
     pictures: NewsPictures,
     query: String,
@@ -378,7 +421,7 @@ private fun ListScreen(
     // A tag the latest feed no longer carries is no filter at all.
     val tag = activeTag?.takeIf { it in tags }
     val filtered = items.orEmpty().filter { a ->
-        (tag == null || a.tags.contains(tag)) && a.matches(query)
+        (tag == null || a.tags.contains(tag)) && (serverHits || a.matches(query))
     }
 
     Column(
@@ -425,7 +468,7 @@ private fun ListScreen(
                             }
                         }
                     }
-                    items(filtered, key = { it.id }) { NewsCard(it, now, pictures, query) { onOpen(it) } }
+                    items(filtered, key = { it.id }) { NewsCard(it, now, pictures, query, onDiscuss = { onDiscuss(it) }) { onOpen(it) } }
                     if (canLoadMore) {
                         item(key = "more") {
                             // Composed only when the list reaches its end: that asks for the next page.
@@ -653,7 +696,14 @@ private fun NewsItem.metaLine(now: Instant, kindColor: Color): AnnotatedString =
  * is a card of text alone: no empty tile.
  */
 @Composable
-private fun NewsCard(article: NewsItem, now: Instant, pictures: NewsPictures, query: String, onClick: () -> Unit) {
+private fun NewsCard(
+    article: NewsItem,
+    now: Instant,
+    pictures: NewsPictures,
+    query: String,
+    onDiscuss: () -> Unit,
+    onClick: () -> Unit,
+) {
     val kindColor = AccentInk
     val shape = RoundedCornerShape(22.dp)
     var pictureMissing by remember(article.id) { mutableStateOf(false) }
@@ -736,7 +786,25 @@ private fun NewsCard(article: NewsItem, now: Instant, pictures: NewsPictures, qu
                     style = TextStyle(color = Text3, fontSize = 11.sp),
                 )
             }
+            if (article.kind == NewsKind.Paper) {
+                Spacer(Modifier.height(12.dp))
+                Chip("Discuss this paper", onDiscuss)
+            }
         }
+    }
+}
+
+/** A small tappable pill: the Discuss button on a paper card, and a question under the article's. */
+@Composable
+private fun Chip(label: String, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .border(1.dp, BorderC, RoundedCornerShape(99.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(label, style = TextStyle(color = TextC, fontSize = 13.sp, fontWeight = FontWeight.Medium))
     }
 }
 
@@ -793,6 +861,7 @@ private fun DetailsScreen(
     pictures: NewsPictures,
     onBack: () -> Unit,
     onDiscuss: (NewsItem) -> Unit,
+    onAsk: (NewsItem, String) -> Unit,
 ) {
     val context = LocalContext.current
     val paper = article.kind == NewsKind.Paper
@@ -885,6 +954,14 @@ private fun DetailsScreen(
                         style = TextStyle(color = OnAccent, fontSize = 15.sp, fontWeight = FontWeight.Medium),
                     )
                 }
+                // The questions most worth asking, one tap each: they open the same chat, already asked.
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    quickQuestions(article).forEach { q -> Chip(q.label) { onAsk(article, q.question) } }
+                }
 
                 if (article.keyPoints.isNotEmpty()) {
                     Spacer(Modifier.height(SECTION_GAP))
@@ -971,6 +1048,9 @@ private fun DetailsScreen(
 }
 
 private val SECTION_GAP = 28.dp
+
+/** How long the search box is left alone before the server is asked. */
+private const val SEARCH_DEBOUNCE_MS = 300L
 
 /** "Source  ·  Oct 14, 2026  ·  1h ago"; whichever the feed did not give is left out. */
 private fun NewsItem.byline(now: Instant): String = listOf(

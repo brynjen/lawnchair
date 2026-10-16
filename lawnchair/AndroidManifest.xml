@@ -35,6 +35,9 @@
         android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- A Bluetooth headset in call mode is the microphone and speaker of a voice turn
+         (NexusAudioRoute, and the app's AudioRouteService). -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <!-- Signature-level gate on the Nexus app's config ContentProvider (NexusConfigProvider,
          read by NexusConfig). The app is embedded in this APK now, so the reader is ourselves. -->
     <permission

@@ -10,6 +10,7 @@ import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.net.NexusTurnEvent
 import app.lawnchair.nexus.net.NexusUnauthorizedException
 import app.lawnchair.nexus.voice.NexusAudioCapture
+import app.lawnchair.nexus.voice.NexusAudioRoute
 import app.lawnchair.nexus.voice.NexusTtsPlayer
 import app.lawnchair.nexus.voice.TokenEnvelope
 import app.lawnchair.nexus.voice.TtsEnvelope
@@ -73,6 +74,8 @@ class NexusChatController(
     initialGesture: MicGesture = MicGesture.None,
     /** The article this conversation is about, when it was opened from the News page. */
     val subject: ChatSubject? = null,
+    /** Puts a Bluetooth headset in call mode for a voice turn; null leaves the phone's mic and speaker. */
+    private val route: NexusAudioRoute? = null,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -156,7 +159,10 @@ class NexusChatController(
         val sessionId = conversationId?.toString() ?: "pending"
         _state.update { it.copy(phase = TurnPhase.Listening, userTranscript = "", errorMessage = null) }
 
-        val cap = NexusAudioCapture()
+        // Before the mic opens: the recorder picks its source from the link, and the reply that
+        // follows plays through it.
+        route?.acquire()
+        val cap = NexusAudioCapture(route)
         capture = cap
         armWatchdog(TurnPhase.Listening, 45_000, "No speech detected.")
 
@@ -227,7 +233,7 @@ class NexusChatController(
 
         val turnId = newTurnId()
         currentTurnId = turnId
-        val player = NexusTtsPlayer(scope, onSegmentStarted = { ttsEnvelope.bump() })
+        val player = NexusTtsPlayer(scope, onSegmentStarted = { ttsEnvelope.bump() }, route = route)
         ttsPlayer?.release()
         ttsPlayer = player
         armWatchdog(TurnPhase.Thinking, 120_000, "The assistant took too long.")
@@ -268,6 +274,7 @@ class NexusChatController(
             pendingPromptId = null
             player.markEndOfStream()
             player.awaitDrain()
+            route?.release()
             cancelWatchdog()
             if (_state.value.phase != TurnPhase.Failed) {
                 _state.update { it.copy(phase = TurnPhase.Done) }
@@ -346,6 +353,7 @@ class NexusChatController(
         cancelWatchdog()
         capture?.stop()
         ttsPlayer?.release()
+        route?.release()
         scope.cancel()
     }
 
@@ -422,6 +430,7 @@ class NexusChatController(
     private fun fail(message: String) {
         cancelWatchdog()
         capture?.stop()
+        route?.release()
         pendingPromptId = null
         bumpFailure()
         showAssistantLine("⚠ $message")
@@ -431,6 +440,7 @@ class NexusChatController(
     private fun reset(phase: TurnPhase) {
         cancelWatchdog()
         capture?.stop()
+        route?.release()
         currentTurnId = null
         _state.update { it.copy(phase = phase, userTranscript = "") }
     }

@@ -158,7 +158,7 @@ class FakeNexusTransport(
         }
     }
 
-    override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?): NewsFeed {
+    override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?, query: String?): NewsFeed {
         delay(150)
         val now = Instant.now()
         return NewsFeed(

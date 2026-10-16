@@ -54,7 +54,7 @@ open class StubNexusTransport : NexusTransport {
 
     override fun watchBox(base: String, token: String): Flow<SubstrateFrame> = unused()
 
-    override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?): NewsFeed = unused()
+    override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?, query: String?): NewsFeed = unused()
 
     override suspend fun newsRefresh(base: String, token: String): NewsFeed = unused()
 

@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.provider.Settings
 
 /**
@@ -27,6 +28,7 @@ object MicPermission {
 
     private const val PREFS = "nexus_mic_perm"
     private const val KEY_ASKED = "asked"
+    private const val KEY_HEADSET_ASKED = "headset_asked"
 
     fun state(activity: Activity): State {
         val granted = activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
@@ -44,6 +46,21 @@ object MicPermission {
     fun markAsked(context: Context) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(KEY_ASKED, true).apply()
+    }
+
+    /**
+     * Whether to ask for BLUETOOTH_CONNECT along with the mic: Android 12+ lists no Bluetooth headset
+     * among the devices a call can use to an app without it, and asking for the mic is when a person
+     * expects to be asked. Once only: a refusal is an answer.
+     */
+    fun shouldAskHeadset(activity: Activity): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            activity.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED &&
+            !activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_HEADSET_ASKED, false)
+
+    fun markHeadsetAsked(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putBoolean(KEY_HEADSET_ASKED, true).apply()
     }
 
     private fun hasAsked(context: Context): Boolean =

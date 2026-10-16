@@ -485,20 +485,30 @@ class LawnchairLauncher : QuickstepLauncher() {
     private var micPermissionCallback: ((Boolean) -> Unit)? = null
 
     /**
-     * Request RECORD_AUDIO if not already granted, invoking [callback] with the result. Granted
-     * synchronously → callback fires immediately; otherwise the system dialog shows and the callback
-     * fires from [onRequestPermissionsResult].
+     * Request RECORD_AUDIO if not already granted (and, once, BLUETOOTH_CONNECT on Android 12+, so
+     * a Bluetooth headset can be the microphone and speaker), invoking [callback] with whether the
+     * mic is granted. Nothing to ask → callback fires immediately; otherwise the system dialog shows
+     * and the callback fires from [onRequestPermissionsResult].
      */
     fun requestMicPermission(callback: (Boolean) -> Unit) {
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+        val micGranted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
-        ) {
+        val askHeadset = MicPermission.shouldAskHeadset(this)
+        if (micGranted && !askHeadset) {
             callback(true)
             return
         }
         micPermissionCallback = callback
-        MicPermission.markAsked(this)
-        requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC_PERMISSION)
+        val wanted = mutableListOf<String>()
+        if (!micGranted) {
+            MicPermission.markAsked(this)
+            wanted += android.Manifest.permission.RECORD_AUDIO
+        }
+        if (askHeadset) {
+            MicPermission.markHeadsetAsked(this)
+            wanted += android.Manifest.permission.BLUETOOTH_CONNECT
+        }
+        requestPermissions(wanted.toTypedArray(), REQ_MIC_PERMISSION)
     }
 
     override fun onRequestPermissionsResult(
@@ -507,7 +517,8 @@ class LawnchairLauncher : QuickstepLauncher() {
         grantResults: IntArray,
     ) {
         if (requestCode == REQ_MIC_PERMISSION) {
-            val granted = grantResults.firstOrNull() ==
+            // Only the mic gates the turn; a refused headset permission means the phone's own mic.
+            val granted = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
                 android.content.pm.PackageManager.PERMISSION_GRANTED
             micPermissionCallback?.invoke(granted)
             micPermissionCallback = null

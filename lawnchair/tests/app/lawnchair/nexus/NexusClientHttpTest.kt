@@ -197,4 +197,19 @@ class NexusClientHttpTest {
         assertEquals("2026-10-14T06:00:00.000Z|8", asked.getString("cursor"))
         assertEquals(50, asked.getInt("limit"))
     }
+
+    @Test
+    fun `a search goes with the feed call as the query, and only when there is one`() {
+        val plain = LinkedBlockingQueue<Seen>()
+        runBlocking { NexusClient().newsFeed(serve(200, feedJson.toByteArray(), plain), "k", 50) }
+        assertFalse(JSONObject(plain.poll(5, TimeUnit.SECONDS)!!.body).has("query"))
+
+        val searched = LinkedBlockingQueue<Seen>()
+        runBlocking {
+            NexusClient().newsFeed(serve(200, feedJson.toByteArray(), searched), "k", 50, section = "ai", query = "forsvar")
+        }
+        val asked = JSONObject(searched.poll(5, TimeUnit.SECONDS)!!.body)
+        assertEquals("forsvar", asked.getString("query"))
+        assertEquals("ai", asked.getString("section"))
+    }
 }

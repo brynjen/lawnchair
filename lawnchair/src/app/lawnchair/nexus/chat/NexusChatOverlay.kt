@@ -14,6 +14,7 @@ import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.FakeNexusTransport
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusTransport
+import app.lawnchair.nexus.voice.NexusAudioRoute
 import com.android.launcher3.InsettableFrameLayout
 
 /**
@@ -33,7 +34,14 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
     private var backCallback: Any? = null
     private var prevSoftInputMode: Int? = null
 
-    private fun show(mode: Mode, serverUrl: String, token: String, gesture: MicGesture, subject: ChatSubject? = null) {
+    private fun show(
+        mode: Mode,
+        serverUrl: String,
+        token: String,
+        gesture: MicGesture,
+        subject: ChatSubject? = null,
+        firstMessage: String? = null,
+    ) {
         if (panel != null) return
         val parent = (launcher.dragLayer?.parent as? ViewGroup) ?: launcher.dragLayer ?: return
 
@@ -45,7 +53,7 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
         // └─────────────────────────────────────────────────────────────────────────────────────┘
         val transport: NexusTransport =
             if (USE_MOCK || simulate || serverUrl == MOCK_URL) FakeNexusTransport() else NexusClient()
-        val ctrl = NexusChatController(transport, serverUrl, token, mode, gesture, subject)
+        val ctrl = NexusChatController(transport, serverUrl, token, mode, gesture, subject, NexusAudioRoute(launcher))
         controller = ctrl
 
         // Read the status-bar height synchronously from the (already-attached) parent so the
@@ -80,6 +88,11 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
 
         registerBackHandler(ctrl)
         if (gesture != MicGesture.None) ctrl.startListening()
+        // A question chosen under an article is asked at once, as if typed.
+        if (!firstMessage.isNullOrBlank()) {
+            ctrl.onInput(firstMessage)
+            ctrl.send()
+        }
     }
 
     /** For the Hold gesture: the QSB owns the press lifecycle and calls this on release. */
@@ -142,10 +155,11 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
         /**
          * Tap on the pill's text area → Text mode. With a [subject] the conversation is about that
          * News article (the Discuss button): the server reads it to the lead and answers in text.
+         * A [firstMessage] (a question chosen under the article) is asked at once.
          */
-        fun openText(launcher: LawnchairLauncher, subject: ChatSubject? = null) {
+        fun openText(launcher: LawnchairLauncher, subject: ChatSubject? = null, firstMessage: String? = null) {
             val (url, token) = resolveOrNudge(launcher) ?: return
-            NexusChatOverlay(launcher).show(Mode.Text, url, token, MicGesture.None, subject)
+            NexusChatOverlay(launcher).show(Mode.Text, url, token, MicGesture.None, subject, firstMessage)
         }
 
         /**

@@ -74,6 +74,9 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
                     onDiscuss = { article ->
                         NexusChatOverlay.openText(launcher, ChatSubject("news", article.id, article.title))
                     },
+                    onAsk = { article, question ->
+                        NexusChatOverlay.openText(launcher, ChatSubject("news", article.id, article.title), question)
+                    },
                 )
             }
         }

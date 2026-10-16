@@ -77,10 +77,19 @@ class NewsRepository(
 
     /**
      * The page of [section] after [cursor] (a `nextCursor`), not saved: the saved copy is the first
-     * page. Null when it could not be had.
+     * page. With a [query] it is the next page of that search. Null when it could not be had.
      */
-    suspend fun more(section: String?, cursor: String): NewsFeed? = calls.withLock {
-        attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT, cursor, section) }
+    suspend fun more(section: String?, cursor: String, query: String? = null): NewsFeed? = calls.withLock {
+        attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT, cursor, section, query) }
+    }
+
+    /**
+     * The first page of the articles in [section] that say [query], found by the server in everything
+     * it holds (the phone only has the pages it has loaded). Not saved. Null when it could not be had,
+     * and the page then keeps filtering what it has.
+     */
+    suspend fun search(section: String?, query: String): NewsFeed? = calls.withLock {
+        attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT, null, section, query) }
     }
 
     /**

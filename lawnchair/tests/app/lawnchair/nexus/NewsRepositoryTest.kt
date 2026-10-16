@@ -130,9 +130,13 @@ class NewsRepositoryTest {
         /** The (section, cursor) of each feed call. */
         val asked = mutableListOf<Pair<String?, String?>>()
 
-        override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?): NewsFeed {
+        /** The query of each feed call (null for a plain one). */
+        val queries = mutableListOf<String?>()
+
+        override suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String?, section: String?, query: String?): NewsFeed {
             feedCalls++
             asked += section to cursor
+            queries += query
             return onFeed()
         }
 
@@ -299,5 +303,28 @@ class NewsRepositoryTest {
         assertEquals(RefreshResult.Unreachable, repo.sweep(shown = null, section = "papers"))
         assertNull(repo.saved("papers"))
         assertEquals(RefreshResult.New(feed(8, 9), 2), repository(News(onFeed = { throw IOException("down") }, onRefresh = { feed(8, 9) })).sweep(shown = null))
+    }
+
+    @Test
+    fun `a search asks the server for the query in the section, and is not saved`() = runBlocking {
+        val transport = News(onFeed = { feed(5, 6) })
+        val repo = repository(transport)
+        assertEquals(feed(5, 6), repo.search("ai", "forsvar"))
+        assertEquals(listOf<String?>("forsvar"), transport.queries)
+        assertEquals(listOf<Pair<String?, String?>>("ai" to null), transport.asked)
+        assertNull(repo.saved("ai"))
+    }
+
+    @Test
+    fun `a search that fails is null`() = runBlocking {
+        assertNull(repository(News(onFeed = { throw IOException("no network") })).search(null, "x"))
+    }
+
+    @Test
+    fun `the next page of a search carries the query and the cursor`() = runBlocking {
+        val transport = News(onFeed = { feed(7) })
+        repository(transport).more("now", "2026-10-14T06:00:00.000Z|8", "forsvar")
+        assertEquals(listOf<String?>("forsvar"), transport.queries)
+        assertEquals(listOf<Pair<String?, String?>>("now" to "2026-10-14T06:00:00.000Z|8"), transport.asked)
     }
 }

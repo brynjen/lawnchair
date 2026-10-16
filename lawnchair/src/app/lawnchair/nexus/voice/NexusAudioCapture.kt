@@ -24,7 +24,10 @@ import kotlin.math.sqrt
  * consumer keys its end-of-stream (whisper EOF → final transcript) off the flow completing. Caller
  * must hold `RECORD_AUDIO` before [start] (see `MicPermission`).
  */
-class NexusAudioCapture {
+class NexusAudioCapture(
+    /** The headset in call mode for the turn, which is then the microphone; null is the phone's. */
+    private val route: NexusAudioRoute? = null,
+) {
 
     private val _amplitude = MutableStateFlow(0f)
 
@@ -47,8 +50,10 @@ class NexusAudioCapture {
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL, ENCODING)
             .coerceAtLeast(2 * SAMPLE_RATE / 10)
         val chunkBytes = (SAMPLE_RATE * 2 * chunkMs / 1000).coerceAtLeast(320) // 16-bit mono
+        val headset = route?.headset
         val rec = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            // A headset in call mode records as a call; otherwise as before.
+            if (headset != null) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             CHANNEL,
             ENCODING,
@@ -61,6 +66,7 @@ class NexusAudioCapture {
         }
         record = rec
         running = true
+        route?.input()?.let { rec.setPreferredDevice(it) }
         rec.startRecording()
 
         // Blocking reads run on IO; stop() flips `running` so the loop exits and the flow completes.

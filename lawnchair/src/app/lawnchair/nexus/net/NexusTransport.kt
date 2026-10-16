@@ -79,9 +79,17 @@ interface NexusTransport {
     /**
      * The news feed (`POST /news {"method":"feed","limit":n}`), newest first as the server orders it.
      * [section] is `now`, `ai` or `papers` (none: everything); [cursor] is a page's `nextCursor`, for
-     * the page after it.
+     * the page after it; [query] narrows it to the articles that say it, the server searching its whole
+     * catalogue rather than the page the phone holds.
      */
-    suspend fun newsFeed(base: String, token: String, limit: Int, cursor: String? = null, section: String? = null): NewsFeed
+    suspend fun newsFeed(
+        base: String,
+        token: String,
+        limit: Int,
+        cursor: String? = null,
+        section: String? = null,
+        query: String? = null,
+    ): NewsFeed
 
     /**
      * Ask the server to sweep its news sources now and return the feed (`POST /news

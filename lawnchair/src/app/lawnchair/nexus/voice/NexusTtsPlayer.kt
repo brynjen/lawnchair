@@ -3,6 +3,8 @@ package app.lawnchair.nexus.voice
 import android.media.AudioAttributes
 import android.media.MediaDataSource
 import android.media.MediaPlayer
+import android.os.Build
+import android.util.Log
 import app.lawnchair.nexus.net.AudioSegment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -27,6 +29,8 @@ import kotlin.coroutines.resume
 class NexusTtsPlayer(
     scope: CoroutineScope,
     private val onSegmentStarted: (Int) -> Unit = {},
+    /** The headset in call mode for the turn, which then plays the reply as a call; null is the phone's. */
+    private val route: NexusAudioRoute? = null,
 ) {
     private val queue = Channel<AudioSegment>(Channel.UNLIMITED)
 
@@ -41,7 +45,8 @@ class NexusTtsPlayer(
         for (seg in queue) {
             currentSegmentIndex = seg.segmentIndex
             onSegmentStarted(seg.segmentIndex)
-            runCatching { playSegment(seg) } // degrade gracefully on decode failure
+            // Degrade gracefully on decode failure; the turn (text + orb) goes on.
+            runCatching { playSegment(seg) }.onFailure { Log.w(TAG, "segment ${seg.segmentIndex} not played", it) }
         }
     }
 
@@ -80,19 +85,23 @@ class NexusTtsPlayer(
 
     private suspend fun playSegment(seg: AudioSegment) = suspendCancellableCoroutine { cont ->
         val player = MediaPlayer().apply {
+            val headset = route?.headset
             setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    // A headset in call mode takes only call-stream sound.
+                    .setUsage(if (headset != null) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_ASSISTANT)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
+            if (headset != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setPreferredDevice(headset)
             setDataSource(ByteArrayMediaDataSource(seg.bytes))
             setOnCompletionListener {
                 runCatching { it.release() }
                 if (current === this) current = null
                 if (cont.isActive) cont.resume(Unit)
             }
-            setOnErrorListener { mp, _, _ ->
+            setOnErrorListener { mp, what, extra ->
+                Log.w(TAG, "segment ${seg.segmentIndex} error what=$what extra=$extra")
                 runCatching { mp.release() }
                 if (current === this) current = null
                 if (cont.isActive) cont.resume(Unit)
@@ -105,10 +114,15 @@ class NexusTtsPlayer(
             player.prepare() // segments are small in-memory buffers; sync prepare is fine
             player.start()
         }.onFailure {
+            Log.w(TAG, "segment ${seg.segmentIndex} would not start", it)
             runCatching { player.release() }
             if (current === player) current = null
             if (cont.isActive) cont.resume(Unit)
         }
+    }
+
+    private companion object {
+        const val TAG = "NexusTtsPlayer"
     }
 
     /** A [MediaDataSource] backed by an in-memory byte array (one complete audio container). */
