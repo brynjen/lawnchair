@@ -363,6 +363,28 @@ class NexusClient(
             }
         }
 
+    override fun watchConversation(base: String, token: String, conversationId: Int): Flow<NexusTurnEvent> =
+        openMethodStream(
+            base,
+            token,
+            ENDPOINT_VOICE,
+            METHOD_STREAM_TURN,
+            JSONObject().put("conversationId", conversationId),
+            onReady = {},
+        ).transformWhile { ev ->
+            when (ev) {
+                is MethodStreamEvent.Message -> {
+                    parseTurnEvent(ev.data)?.let { emit(it) }
+                    true
+                }
+
+                is MethodStreamEvent.Ended -> {
+                    emit(NexusTurnEvent.Failed(ev.reason))
+                    false
+                }
+            }
+        }
+
     /** Read a stream message's `data.o.data` → a [NexusTurnEvent], or null for ignored kinds. */
     private fun parseTurnEvent(data: JSONObject): NexusTurnEvent? {
         val turnId = data.optString("turnId", "").ifEmpty { null }

@@ -70,6 +70,23 @@ class NexusBudsService : Service() {
     // The one link to the earbuds, shared by the cue and the turn.
     private val route by lazy { NexusAudioRoute(this) }
 
+    // Follows the current conversation for reports of finished background runs, which are said in the
+    // earbuds or on the phone, or shown as a notification, wherever the person is.
+    private val reports by lazy {
+        NexusReportWatcher(
+            context = this,
+            scope = scope,
+            transport = NexusClient(),
+            server = { NexusConfig.read(this).takeIf { it.enabled }?.let { it.serverUrl to it.authKey } },
+        )
+    }
+
+    private fun followConversation(id: Int?) {
+        if (id == null) return
+        getSharedPreferences("NexusReports", Context.MODE_PRIVATE).edit().putInt("conversation", id).apply()
+        reports.watch(id)
+    }
+
     private val audio by lazy { getSystemService(AudioManager::class.java) }
     private var blip: AudioTrack? = null
     private var claimedAt = 0L
@@ -143,6 +160,8 @@ class NexusBudsService : Service() {
             isActive = true
         }
         claimMediaButtons("start")
+        NexusBudsBridge.onConversation = { id -> handler.post { reports.watch(id) } }
+        reports.watch(getSharedPreferences("NexusReports", Context.MODE_PRIVATE).getInt("conversation", 0).takeIf { it > 0 })
         audio.registerAudioDeviceCallback(deviceCallback, handler)
         audio.registerAudioPlaybackCallback(playbackCallback, handler)
         cues.prefetch()
@@ -191,6 +210,8 @@ class NexusBudsService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        NexusBudsBridge.onConversation = null
+        reports.stop()
         runCatching { audio.unregisterAudioDeviceCallback(deviceCallback) }
         runCatching { audio.unregisterAudioPlaybackCallback(playbackCallback) }
         blip?.let { runCatching { it.release() } }
@@ -325,6 +346,7 @@ class NexusBudsService : Service() {
         controller = c
         watching = scope.launch {
             c.state.collect { s ->
+                followConversation(c.currentConversationId)
                 if (s.phase != phase) {
                     phase = s.phase
                     show(null)

@@ -114,6 +114,9 @@ class NexusChatController(
     private val ttsEnvelope = TtsEnvelope()
 
     private var conversationId: Int? = null
+
+    /** The conversation this controller is in, once it has one. */
+    val currentConversationId: Int? get() = conversationId
     private var currentTurnId: String? = null
     private var answerIndex: Int = -1
     // The `ask_user` question the open turn waits on; the next input answers it.

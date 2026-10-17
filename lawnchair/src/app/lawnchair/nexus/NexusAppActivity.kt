@@ -23,6 +23,11 @@ class NexusAppActivity : FlutterFragmentActivity() {
             when (call.method) {
                 "home" -> NexusBudsBridge.homeReady = call.arguments as? Boolean ?: false
                 "busy" -> NexusBudsBridge.busy = call.arguments as? Boolean ?: false
+                "conversation" -> (call.arguments as? Int)?.let { id ->
+                    // Kept, for the service to follow when it starts before the app has said.
+                    getSharedPreferences("NexusReports", MODE_PRIVATE).edit().putInt("conversation", id).apply()
+                    NexusBudsBridge.onConversation?.invoke(id)
+                }
                 else -> {
                     result.notImplemented()
                     return@setMethodCallHandler

@@ -19,6 +19,15 @@ interface NexusTransport {
     suspend fun createConversation(base: String, token: String, subject: ChatSubject? = null): Int
 
     /**
+     * The events of [conversationId], for as long as the stream stays open: unlike [streamTurn] it does
+     * not end with a turn. How a report of a finished background run, which the server makes without
+     * anyone asking, reaches a phone that is not looking at the conversation. Ends with a
+     * [NexusTurnEvent.Failed] when the connection goes; empty where a transport has no such stream.
+     */
+    fun watchConversation(base: String, token: String, conversationId: Int): Flow<NexusTurnEvent> =
+        kotlinx.coroutines.flow.emptyFlow()
+
+    /**
      * A short spoken line (Ogg/Opus) for the earbuds when the microphone is open, in the person's voice
      * and [language] (`no`, `en`; null leaves it to the server). Null when there is none.
      */
