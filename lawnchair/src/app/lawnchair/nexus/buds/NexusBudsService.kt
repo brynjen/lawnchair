@@ -293,13 +293,19 @@ class NexusBudsService : Service() {
             // same link (it is the same object) and gives it back when the turn is over.
             route.acquire()
             // The line is spoken in the earbuds, in the person's voice; playing it brings the call link up.
-            // A beep when none is ready or it would not play.
-            val spoken = cues.take()?.let { NexusCuePlayer.speak(it, route) } ?: false
-            if (!spoken) {
-                cue(route.held)
-                delay(CUE_MS)
+            // A beep when none is ready or it would not play. It is not waited for: the earbuds' mic
+            // delivers silence for a second or two after it opens, so it opens now and what it hears
+            // until the line is over is thrown away.
+            val line = cues.take()
+            val cueOver = launch {
+                val spoken = line?.let { NexusCuePlayer.speak(it, route) } ?: false
+                if (!spoken) {
+                    cue(route.held)
+                    delay(CUE_MS)
+                }
+                delay(CUE_TAIL_MS)
             }
-            c.startListening(handsFree = true)
+            c.startListening(handsFree = true, cueOver = cueOver)
         }
     }
 
@@ -378,6 +384,9 @@ class NexusBudsService : Service() {
 
         /** How long the cue plays before the mic opens, so it is not heard as speech. */
         const val CUE_MS = 220L
+
+        /** How long after the line what the mic hears is still its tail leaking in, and not the person. */
+        const val CUE_TAIL_MS = 250L
 
         /** A conversation is kept for this long after the last turn; a double tap later starts a new one. */
         const val CONVERSATION_MS = 10 * 60_000L

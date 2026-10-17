@@ -27,6 +27,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -161,7 +162,13 @@ class NexusChatController(
      * Begin recording (permission already ensured by the caller). A [handsFree] turn has no finger to
      * lift: it ends when the person stops speaking (the setting under Microphone), or at the longest turn.
      */
-    fun startListening(handsFree: Boolean = false) {
+    /**
+     * Opens the mic. With [cueOver] (the "speak now" line of a turn started from the earbuds, still
+     * being played) the mic is already open, but what it hears until the line is over is thrown away
+     * and the end of the turn is not waited for before then: an earbud microphone delivers silence
+     * for a second or two after it opens, which the line is then spoken through.
+     */
+    fun startListening(handsFree: Boolean = false, cueOver: Job? = null) {
         if (busy) return
         val turnId = newTurnId()
         // An answer continues the open turn: keep its id so the resumed reply is not dropped.
@@ -176,7 +183,18 @@ class NexusChatController(
         val prefs = micPrefs()
         val cap = NexusAudioCapture(route, prefs)
         capture = cap
-        if (handsFree) endWhenSilent(cap, prefs.silenceMs)
+        val heard = java.util.concurrent.atomic.AtomicBoolean(cueOver == null)
+        cueOver?.invokeOnCompletion { heard.set(true) }
+        if (handsFree) {
+            if (cueOver == null) {
+                endWhenSilent(cap, prefs.silenceMs)
+            } else {
+                scope.launch {
+                    cueOver.join()
+                    if (capture === cap) endWhenSilent(cap, prefs.silenceMs)
+                }
+            }
+        }
         armWatchdog(TurnPhase.Listening, 45_000, "No speech detected.")
 
         listenJob = scope.launch {
@@ -186,7 +204,7 @@ class NexusChatController(
                     token = token,
                     recordingId = recordingId,
                     sessionId = sessionId,
-                    pcm16Chunks = cap.start(),
+                    pcm16Chunks = if (cueOver == null) cap.start() else cap.start().filter { heard.get() },
                 ).collect { ev ->
                     if (ev.isError) {
                         fail(ev.errorMessage ?: "Transcription failed.")
