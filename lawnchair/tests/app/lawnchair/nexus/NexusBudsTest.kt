@@ -258,4 +258,18 @@ class NexusBudsTest {
     }
 
     // endregion
+
+    @Test
+    fun `the previous-track key starts a new conversation whatever is going on`() {
+        for (phase in TurnPhase.values()) {
+            assertEquals(phase.name, BudsAction.StartNew, budsAction(Tap.New, phase))
+        }
+    }
+
+    @Test
+    fun `the new-conversation key goes to the app whenever its Home screen is up`() {
+        assertTrue(appTakesTap(Tap.New, appResumed = true, homeReady = true, busy = false))
+        assertTrue(appTakesTap(Tap.New, appResumed = true, homeReady = true, busy = true))
+        assertFalse(appTakesTap(Tap.New, appResumed = false, homeReady = true, busy = false))
+    }
 }

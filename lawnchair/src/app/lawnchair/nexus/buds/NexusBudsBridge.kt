@@ -22,7 +22,14 @@ object NexusBudsBridge {
         val line = channel ?: return false
         if (!appTakesTap(tap, resumed, homeReady, busy)) return false
         Handler(Looper.getMainLooper()).post {
-            line.invokeMethod("tap", if (tap == Tap.Double) "double" else "single")
+            line.invokeMethod(
+                "tap",
+                when (tap) {
+                    Tap.Double -> "double"
+                    Tap.Single -> "single"
+                    Tap.New -> "new"
+                },
+            )
         }
         return true
     }

@@ -227,6 +227,7 @@ class NexusBudsService : Service() {
             ) ?: return false
         val tap = when (event.keyCode) {
             KeyEvent.KEYCODE_MEDIA_NEXT -> Tap.Double
+            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> Tap.New
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP,
             -> Tap.Single
@@ -261,6 +262,13 @@ class NexusBudsService : Service() {
                 startTurn()
             }
             BudsAction.Cancel -> controller?.interrupt()
+            BudsAction.StartNew -> {
+                // A new conversation: the old controller (and its conversation) is let go.
+                controller?.interrupt()
+                controller?.close()
+                controller = null
+                startTurn()
+            }
             BudsAction.Ignore -> Unit
         }
     }

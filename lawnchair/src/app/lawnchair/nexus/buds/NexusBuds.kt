@@ -111,17 +111,23 @@ class SilenceEndDetector(
     }
 }
 
-/** A tap on the earbuds, as the media keys the system sends for it. */
-enum class Tap { Double, Single }
+/**
+ * A tap on the earbuds, as the media keys the system sends for it: the next-track key ([Double], the
+ * double tap of most earbuds), the play/pause key ([Single]) and the previous-track key ([New], a
+ * triple tap, or whatever the earbuds' own app has put on it).
+ */
+enum class Tap { Double, Single, New }
 
-enum class BudsAction { StartListening, FinishListening, InterruptAndListen, Cancel, Ignore }
+enum class BudsAction { StartListening, FinishListening, InterruptAndListen, Cancel, StartNew, Ignore }
 
 /**
  * What a tap does, given where the turn is. A double tap (the next-track key) is the way in: it starts a
  * turn, sends what has been said, or cuts Nexus off and listens. A single tap (play/pause) only ever
- * stops a turn that is going; with none, it is left to whatever else is playing.
+ * stops a turn that is going; with none, it is left to whatever else is playing. The previous-track key
+ * starts a new conversation and listens, whatever is going.
  */
 fun budsAction(tap: Tap, phase: TurnPhase): BudsAction = when (tap) {
+    Tap.New -> BudsAction.StartNew
     Tap.Double -> when (phase) {
         TurnPhase.Listening -> BudsAction.FinishListening
         TurnPhase.Thinking, TurnPhase.Speaking -> BudsAction.InterruptAndListen
@@ -139,7 +145,7 @@ fun budsAction(tap: Tap, phase: TurnPhase): BudsAction = when (tap) {
  * going (otherwise a single tap is the music app's to take).
  */
 fun appTakesTap(tap: Tap, appResumed: Boolean, homeReady: Boolean, busy: Boolean): Boolean =
-    appResumed && homeReady && (tap == Tap.Double || busy)
+    appResumed && homeReady && (tap == Tap.Double || tap == Tap.New || busy)
 
 /**
  * The code speech is told in, from the Language setting as the app saves it ("Norsk", "English",
