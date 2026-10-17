@@ -82,6 +82,14 @@ class NexusClient(
         return post(base, "/voiceSquad", token, request).trim().toInt()
     }
 
+    /** `POST /voiceSquad {"method":"readyCue","language"?}` → the line's audio, or null when the answer has none. */
+    override suspend fun readyCue(base: String, token: String, language: String?): ByteArray? {
+        val request = JSONObject().put("method", "readyCue")
+        if (language != null) request.put("language", language)
+        val b64 = JSONObject(post(base, "/voiceSquad", token, request)).optString("audioDataBase64", "")
+        return b64.takeIf { it.isNotEmpty() }?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+    }
+
     /** `POST /voiceSquad {conversationId, userText, turnId, voice?, method:"submitTurn"}` → void. */
     override suspend fun submitTurn(
         base: String,

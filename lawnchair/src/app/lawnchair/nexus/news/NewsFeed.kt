@@ -66,6 +66,10 @@ data class NewsItem(
     val codeUrl: String? = null,
     val codeStars: Int? = null,
     val claims: List<NewsClaim> = emptyList(),
+    /** The language the article was written in (`no`, `en`, `de` …), when the server could tell. */
+    val lang: String? = null,
+    /** The title, summary and points are an English translation of an article in another language. */
+    val translated: Boolean = false,
 )
 
 /**
@@ -128,6 +132,8 @@ private fun parseItem(element: JsonElement): NewsItem? {
         codeUrl = o.text("codeUrl")?.trim()?.takeIf { it.startsWith("http") },
         codeStars = (o["codeStars"] as? JsonPrimitive)?.longOrNull?.toInt(),
         claims = (o["claims"] as? JsonArray).orEmpty().mapNotNull { parseClaim(it) },
+        lang = o.text("lang")?.trim()?.takeIf { it.isNotEmpty() },
+        translated = (o["translated"] as? JsonPrimitive)?.booleanOrNull ?: false,
     )
 }
 
@@ -178,6 +184,8 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 put("upvotes", item.upvotes)
                 put("codeUrl", item.codeUrl)
                 put("codeStars", item.codeStars)
+                put("lang", item.lang)
+                put("translated", item.translated)
                 putJsonArray("claims") {
                     item.claims.forEach { claim ->
                         addJsonObject {

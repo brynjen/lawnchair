@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -241,6 +242,9 @@ private fun NewsPanel(
     // What the server found for the words in the search box (in everything it holds, not only the pages
     // loaded here), and the words it was asked for. Null until it answers, or when it could not.
     var found by remember { mutableStateOf<Pair<String, NewsFeed>?>(null) }
+    // Where the list is scrolled to. The list leaves the screen while an article is open; this stays, so
+    // back lands where the person was. Another section is another list, and starts at the top.
+    val listState = remember(section) { LazyListState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val transport = remember { NexusClient() }
@@ -266,6 +270,9 @@ private fun NewsPanel(
 
     // Another section is another search.
     LaunchedEffect(section) { found = null }
+
+    // New words are a new list: from the top.
+    LaunchedEffect(query) { listState.scrollToItem(0) }
 
     // The server searches once the person has stopped typing; until it answers (or if it cannot) the
     // page filters what it already holds.
@@ -293,6 +300,7 @@ private fun NewsPanel(
         // The server's answer to the words as they are now, if it has come.
         val hits = found?.takeIf { (words, _) -> words == query.trim() }?.second
         ListScreen(
+            listState = listState,
             items = (hits ?: feed)?.items,
             serverHits = hits != null,
             onDiscuss = onDiscuss,
@@ -395,6 +403,7 @@ private fun LockedScreen(lock: NexusLock, onClose: () -> Unit) {
 
 @Composable
 private fun ListScreen(
+    listState: LazyListState,
     items: List<NewsItem>?,
     /** [items] are the server's answer to [query]: they are not filtered again here. */
     serverHits: Boolean,
@@ -446,6 +455,7 @@ private fun ListScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -685,7 +695,8 @@ private fun NewsItem.metaLine(now: Instant, kindColor: Color): AnnotatedString =
     }
     // A paper is placed by its arXiv class ("CS.LG"), an article by its source.
     val where = if (kind == NewsKind.Paper && categories.isNotEmpty()) categories.first().uppercase() else sourceName.uppercase()
-    val rest = listOf(where, agoText(publishedAt, now)).filter { it.isNotBlank() }
+    // "TRANSLATED" says the words below are an English translation of what the publisher wrote.
+    val rest = listOf(where, agoText(publishedAt, now), if (translated) "TRANSLATED" else "").filter { it.isNotBlank() }
     if (rest.isNotEmpty()) append("  ·  " + rest.joinToString("  ·  "))
 }
 
@@ -1057,7 +1068,25 @@ private fun NewsItem.byline(now: Instant): String = listOf(
     sourceName,
     publishedAt?.let { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withZone(ZoneId.systemDefault()).format(it) }.orEmpty(),
     agoText(publishedAt, now),
+    if (translated) "Translated from ${languageLabel(lang)}" else "",
 ).filter { it.isNotBlank() }.joinToString("  ·  ")
+
+/** The name of the language an article was written in, for "Translated from …". */
+private fun languageLabel(lang: String?): String = when (lang) {
+    "de" -> "German"
+    "fr" -> "French"
+    "es" -> "Spanish"
+    "it" -> "Italian"
+    "nl" -> "Dutch"
+    "pt" -> "Portuguese"
+    "sv" -> "Swedish"
+    "zh" -> "Chinese"
+    "ja" -> "Japanese"
+    "ko" -> "Korean"
+    "ru" -> "Russian"
+    "ar" -> "Arabic"
+    else -> "another language"
+}
 
 @Composable
 private fun KindChip(kind: NewsKind) {

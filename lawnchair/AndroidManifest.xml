@@ -47,6 +47,10 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Double-tap on the earbuds talks to Nexus with the app closed (NexusBudsService): a microphone
+         foreground service, with a notification while it waits. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="com.google.android.apps.nexuslauncher.permission.QSB" />
     <uses-permission android:name="com.kieronquinn.app.smartspacer.permission.ACCESS_SMARTSPACER"/>
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -231,6 +235,11 @@
                 <action android:name="${applicationId}.bugreport.UPLOAD_COMPLETE" />
             </intent-filter>
         </receiver>
+
+        <service
+            android:name="app.lawnchair.nexus.buds.NexusBudsService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <service
             android:name="app.lawnchair.bugreport.UploaderService"

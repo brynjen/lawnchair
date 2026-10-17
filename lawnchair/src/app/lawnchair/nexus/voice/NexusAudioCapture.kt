@@ -4,6 +4,11 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
+import app.lawnchair.nexus.buds.NexusMicPrefs
+import app.lawnchair.nexus.buds.applyGain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -27,6 +32,8 @@ import kotlin.math.sqrt
 class NexusAudioCapture(
     /** The headset in call mode for the turn, which is then the microphone; null is the phone's. */
     private val route: NexusAudioRoute? = null,
+    /** The Microphone settings: the pickup level scales what is sent, the switches go to the platform's effects. */
+    private val prefs: NexusMicPrefs = NexusMicPrefs(),
 ) {
 
     private val _amplitude = MutableStateFlow(0f)
@@ -39,6 +46,9 @@ class NexusAudioCapture(
 
     @Volatile
     private var record: AudioRecord? = null
+
+    // Noise suppression, echo cancellation and automatic gain, as the settings ask; released with the recorder.
+    private var effects: List<android.media.audiofx.AudioEffect> = emptyList()
 
     /**
      * Start capturing; emits ~[chunkMs] PCM16 chunks until [stop] (flow completes) or the collector
@@ -67,6 +77,17 @@ class NexusAudioCapture(
         record = rec
         running = true
         route?.input()?.let { rec.setPreferredDevice(it) }
+        // A call already carries the system's own processing; a second filter on a headset's microphone
+        // is what it does worst with.
+        effects = if (headset != null) {
+            emptyList()
+        } else {
+            listOfNotNull(
+                if (prefs.noiseSuppression && NoiseSuppressor.isAvailable()) NoiseSuppressor.create(rec.audioSessionId) else null,
+                if (prefs.echoCancel && AcousticEchoCanceler.isAvailable()) AcousticEchoCanceler.create(rec.audioSessionId) else null,
+                if (prefs.boost && AutomaticGainControl.isAvailable()) AutomaticGainControl.create(rec.audioSessionId) else null,
+            ).onEach { it.enabled = true }
+        }
         rec.startRecording()
 
         // Blocking reads run on IO; stop() flips `running` so the loop exits and the flow completes.
@@ -76,8 +97,9 @@ class NexusAudioCapture(
                 while (running) {
                     val read = rec.read(buf, 0, buf.size)
                     if (read <= 0) continue
-                    _amplitude.value = rms(buf, read)
-                    trySend(buf.copyOf(read))
+                    val chunk = applyGain(buf, read, prefs.gain).let { if (it === buf) buf.copyOf(read) else it }
+                    _amplitude.value = rms(chunk, chunk.size)
+                    trySend(chunk)
                 }
             } finally {
                 close() // complete the flow so the STT consumer sends EOF
@@ -99,6 +121,8 @@ class NexusAudioCapture(
     private fun stopInternal() {
         val rec = record ?: return
         record = null
+        effects.forEach { runCatching { it.release() } }
+        effects = emptyList()
         runCatching { rec.stop() }
         runCatching { rec.release() }
         _amplitude.value = 0f

@@ -6,6 +6,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
+import app.lawnchair.nexus.buds.NexusMicPrefs
 
 /** A Bluetooth headset a call can use: LE Audio or the classic call profile. */
 data class HeadsetCandidate(val id: Int, val le: Boolean, val name: String, val address: String?)
@@ -39,6 +40,9 @@ class NexusAudioRoute(private val context: Context) {
     @Volatile
     private var linked: AudioDeviceInfo? = null
 
+    // The audio mode before the call mode, put back when the link is given back.
+    private var modeBefore: Int? = null
+
     /** The headset in call mode for the turn in flight, or null. */
     val headset: AudioDeviceInfo? get() = linked
 
@@ -49,16 +53,28 @@ class NexusAudioRoute(private val context: Context) {
     fun acquire(): Boolean {
         if (linked != null) return true
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
+        // The phone microphone is the person's choice under Settings → Microphone.
+        if (NexusMicPrefs.read(context).source == "phone") {
+            Log.i(TAG, "route_skip source=phone")
+            return false
+        }
         return runCatching {
             val manager = audio ?: return false
             val devices = manager.availableCommunicationDevices
             val candidates = devices.mapNotNull { it.asCandidate() }
-            val pick = pickHeadset(candidates, chosenAddress()) ?: return false
+            val pick = pickHeadset(candidates, chosenAddress())
+            if (pick == null) {
+                Log.i(TAG, "route_none headsets=${candidates.size}")
+                return false
+            }
             val device = devices.first { it.id == pick.id }
             if (!manager.setCommunicationDevice(device)) {
                 Log.w(TAG, "route_refused device=${pick.name}")
                 return false
             }
+            // A headset's microphone is a call's: the system routes it only in call mode.
+            modeBefore = manager.mode
+            manager.mode = AudioManager.MODE_IN_COMMUNICATION
             linked = device
             Log.i(TAG, "route_acquire device=${pick.name} kind=${if (pick.le) "le" else "sco"}")
             true
@@ -74,6 +90,8 @@ class NexusAudioRoute(private val context: Context) {
         linked = null
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audio?.clearCommunicationDevice()
+            modeBefore?.let { audio?.mode = it }
+            modeBefore = null
             Log.i(TAG, "route_release device=${device.productName}")
         }.onFailure { Log.w(TAG, "route_release_failed", it) }
     }

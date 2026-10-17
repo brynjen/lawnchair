@@ -212,4 +212,25 @@ class NexusClientHttpTest {
         assertEquals("forsvar", asked.getString("query"))
         assertEquals("ai", asked.getString("section"))
     }
+
+    @Test
+    fun `the spoken line for the earbuds is asked for in a language and comes back as audio`() {
+        val seen = LinkedBlockingQueue<Seen>()
+        val base = serve(200, """{"text":"Si fra.","audioDataBase64":"AQID","durationMs":700}""".toByteArray(), seen)
+
+        val audio = runBlocking { NexusClient().readyCue(base, "k", "no") }
+
+        assertArrayEquals(byteArrayOf(1, 2, 3), audio)
+        val asked = JSONObject(seen.poll(5, TimeUnit.SECONDS)!!.body)
+        assertEquals("readyCue", asked.getString("method"))
+        assertEquals("no", asked.getString("language"))
+    }
+
+    @Test
+    fun `no language is none asked for, and an answer without audio is no line`() {
+        val seen = LinkedBlockingQueue<Seen>()
+        val base = serve(200, """{"text":"x","audioDataBase64":"","durationMs":0}""".toByteArray(), seen)
+        assertEquals(null, runBlocking { NexusClient().readyCue(base, "k", null) })
+        assertFalse(JSONObject(seen.poll(5, TimeUnit.SECONDS)!!.body).has("language"))
+    }
 }

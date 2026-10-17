@@ -14,6 +14,7 @@ import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.FakeNexusTransport
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusTransport
+import app.lawnchair.nexus.buds.NexusMicPrefs
 import app.lawnchair.nexus.voice.NexusAudioRoute
 import com.android.launcher3.InsettableFrameLayout
 
@@ -53,7 +54,11 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
         // └─────────────────────────────────────────────────────────────────────────────────────┘
         val transport: NexusTransport =
             if (USE_MOCK || simulate || serverUrl == MOCK_URL) FakeNexusTransport() else NexusClient()
-        val ctrl = NexusChatController(transport, serverUrl, token, mode, gesture, subject, NexusAudioRoute(launcher))
+        val ctrl = NexusChatController(
+            transport, serverUrl, token, mode, gesture, subject,
+            route = NexusAudioRoute(launcher),
+            micPrefs = { NexusMicPrefs.read(launcher) },
+        )
         controller = ctrl
 
         // Read the status-bar height synchronously from the (already-attached) parent so the

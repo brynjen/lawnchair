@@ -19,6 +19,12 @@ interface NexusTransport {
     suspend fun createConversation(base: String, token: String, subject: ChatSubject? = null): Int
 
     /**
+     * A short spoken line (Ogg/Opus) for the earbuds when the microphone is open, in the person's voice
+     * and [language] (`no`, `en`; null leaves it to the server). Null when there is none.
+     */
+    suspend fun readyCue(base: String, token: String, language: String?): ByteArray? = null
+
+    /**
      * Fire the LLM turn. Fire-and-forget by contract: the server blocks for the whole LLM+TTS
      * pipeline (well past the ~20s RPC timeout), so callers must not await completion here — drive
      * completion off [streamTurn] instead. [turnId] correlates the resulting stream events. [voice]

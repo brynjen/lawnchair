@@ -240,4 +240,35 @@ class NewsFeedTest {
     }
 
     // endregion
+
+    @Test
+    fun `an article the server translated says so, and the language it was in`() {
+        val feed = parseNewsFeed(
+            """{"cards":[{"id":1,"title":"Budget presented","lang":"de","translated":true},
+                          {"id":2,"title":"Budsjettet","lang":"no","translated":false},
+                          {"id":3,"title":"Plain"}]}""",
+        )!!
+        assertEquals(true, feed.items[0].translated)
+        assertEquals("de", feed.items[0].lang)
+        assertEquals(false, feed.items[1].translated)
+        assertEquals("no", feed.items[1].lang)
+        assertEquals(false, feed.items[2].translated)
+        assertNull(feed.items[2].lang)
+    }
+
+    @Test
+    fun `the saved copy keeps the translated tag`() {
+        val feed = NewsFeed(
+            items = listOf(
+                NewsItem(
+                    id = 1, sourceName = "Spiegel", url = "https://example.test/1", title = "Budget presented",
+                    synopsis = "S.", body = null, publishedAt = null, tags = emptyList(),
+                    lang = "de", translated = true,
+                ),
+            ),
+            refreshedAt = null,
+        )
+        assertEquals(feed, parseNewsFeed(feed.toJson()))
+        assertEquals(true, parseNewsFeed(feed.toJson())!!.items.single().translated)
+    }
 }

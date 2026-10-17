@@ -126,7 +126,7 @@ class NexusTtsPlayer(
     }
 
     /** A [MediaDataSource] backed by an in-memory byte array (one complete audio container). */
-    private class ByteArrayMediaDataSource(private val data: ByteArray) : MediaDataSource() {
+    internal class ByteArrayMediaDataSource(private val data: ByteArray) : MediaDataSource() {
         override fun readAt(position: Long, buffer: ByteArray, offset: Int, size: Int): Int {
             if (position >= data.size) return -1
             val end = minOf(position + size, data.size.toLong()).toInt()

@@ -1,7 +1,10 @@
 package app.lawnchair.nexus.chat
 
+import android.os.SystemClock
 import app.lawnchair.nexus.box.BoxOrbState
 import app.lawnchair.nexus.box.boxOrbStates
+import app.lawnchair.nexus.buds.NexusMicPrefs
+import app.lawnchair.nexus.buds.SilenceEndDetector
 import app.lawnchair.nexus.net.AudioSegment
 import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.NexusClient
@@ -25,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.max
 
@@ -76,6 +80,10 @@ class NexusChatController(
     val subject: ChatSubject? = null,
     /** Puts a Bluetooth headset in call mode for a voice turn; null leaves the phone's mic and speaker. */
     private val route: NexusAudioRoute? = null,
+    /** The Microphone settings, read as each recording starts (the person may change them between turns). */
+    private val micPrefs: () -> NexusMicPrefs = { NexusMicPrefs() },
+    /** Whether to follow what the whole box is doing (the orb's); a turn with no screen has no orb. */
+    watchBox: Boolean = true,
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -120,7 +128,7 @@ class NexusChatController(
         get() = _state.value.phase in setOf(TurnPhase.Listening, TurnPhase.Thinking, TurnPhase.Speaking)
 
     init {
-        watchBox()
+        if (watchBox) watchBox()
     }
 
     /**
@@ -149,8 +157,11 @@ class NexusChatController(
 
     // region voice mode
 
-    /** Begin recording (permission already ensured by the caller). */
-    fun startListening() {
+    /**
+     * Begin recording (permission already ensured by the caller). A [handsFree] turn has no finger to
+     * lift: it ends when the person stops speaking (the setting under Microphone), or at the longest turn.
+     */
+    fun startListening(handsFree: Boolean = false) {
         if (busy) return
         val turnId = newTurnId()
         // An answer continues the open turn: keep its id so the resumed reply is not dropped.
@@ -162,8 +173,10 @@ class NexusChatController(
         // Before the mic opens: the recorder picks its source from the link, and the reply that
         // follows plays through it.
         route?.acquire()
-        val cap = NexusAudioCapture(route)
+        val prefs = micPrefs()
+        val cap = NexusAudioCapture(route, prefs)
         capture = cap
+        if (handsFree) endWhenSilent(cap, prefs.silenceMs)
         armWatchdog(TurnPhase.Listening, 45_000, "No speech detected.")
 
         listenJob = scope.launch {
@@ -206,6 +219,21 @@ class NexusChatController(
         capture?.stop()
         cancelWatchdog()
         _state.update { it.copy(phase = TurnPhase.Thinking) } // transcribing → thinking
+    }
+
+    /** Ends the turn by itself once the person has stopped speaking (see [SilenceEndDetector]). */
+    private fun endWhenSilent(cap: NexusAudioCapture, silenceMs: Long?) {
+        val detector = SilenceEndDetector(silenceMs)
+        val began = SystemClock.elapsedRealtime()
+        scope.launch {
+            while (isActive && _state.value.phase == TurnPhase.Listening && capture === cap) {
+                delay(100)
+                if (detector.onLevel(cap.amplitude.value, SystemClock.elapsedRealtime() - began)) {
+                    endRecordingAndSend()
+                    break
+                }
+            }
+        }
     }
 
     /** Voice mode's way to answer a question: record like a tap-to-talk turn. */
@@ -342,6 +370,25 @@ class NexusChatController(
     // endregion
 
     // region lifecycle
+
+    /**
+     * Cuts the turn short: the mic closes, the reply stops, the server is told where the person had
+     * heard to, and the controller is ready for the next turn (the conversation stays).
+     */
+    fun interrupt() {
+        val conversation = conversationId
+        val heard = ttsPlayer?.currentSegmentIndex
+        listenJob?.cancel()
+        turnJob?.cancel()
+        capture?.stop()
+        ttsPlayer?.cancel()
+        route?.release()
+        pendingPromptId = null
+        reset(TurnPhase.Idle)
+        if (conversation != null) {
+            scope.launch { runCatching { transport.cancelTurn(serverUrl, token, conversation, heard) } }
+        }
+    }
 
     fun dismiss() {
         if (_state.value.dismissing) return
