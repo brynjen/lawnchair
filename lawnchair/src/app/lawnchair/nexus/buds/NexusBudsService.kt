@@ -386,7 +386,7 @@ class NexusBudsService : Service() {
         const val CUE_MS = 220L
 
         /** How long after the line what the mic hears is still its tail leaking in, and not the person. */
-        const val CUE_TAIL_MS = 250L
+        const val CUE_TAIL_MS = 100L
 
         /** A conversation is kept for this long after the last turn; a double tap later starts a new one. */
         const val CONVERSATION_MS = 10 * 60_000L

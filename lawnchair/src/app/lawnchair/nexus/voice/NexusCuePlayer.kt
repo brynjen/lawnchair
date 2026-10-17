@@ -18,7 +18,7 @@ import kotlin.coroutines.resume
  */
 object NexusCuePlayer {
     /** How long the call link is given to open, on silence, before the line is played (see [openLink]). */
-    private const val LINK_MS = 600L
+    private const val LINK_MS = 400L
 
     suspend fun speak(bytes: ByteArray, route: NexusAudioRoute?, timeoutMs: Long = 3_600): Boolean =
         withTimeoutOrNull(timeoutMs) {
