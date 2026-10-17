@@ -10,7 +10,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
+import android.media.AudioTrack
 import android.media.ToneGenerator
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -43,8 +47,10 @@ import kotlinx.coroutines.launch
  * the background and the screen off.
  *
  * It is a foreground service (microphone, so the mic can be opened from the background) that keeps a
- * [MediaSession] active: the system sends the earbuds' media keys to the most recent active session,
- * so while nothing else is playing, they come here. Another app that is playing music keeps its keys.
+ * [MediaSession] active. The system sends the earbuds' media keys to the session of the app that last
+ * played audio, so the session claims them with a moment of silent audio ([SilentBlip]) when it starts,
+ * when a headset connects and when whatever was playing stops. Another app that is playing music keeps
+ * its keys, and a key that is not Nexus's (a single tap with no turn going) is passed on to it.
  * A key does what [budsAction] says: a double tap starts a turn (the earbuds' mic, then the reply in
  * the earbuds), sends what has been said, or cuts Nexus off and listens again; a single tap stops a
  * turn that is going and is otherwise left alone.
@@ -63,6 +69,36 @@ class NexusBudsService : Service() {
 
     // The one link to the earbuds, shared by the cue and the turn.
     private val route by lazy { NexusAudioRoute(this) }
+
+    private val audio by lazy { getSystemService(AudioManager::class.java) }
+    private var blip: AudioTrack? = null
+    private var claimedAt = 0L
+
+    // A headset that comes in is what the keys are for: take them.
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+            if (addedDevices.any { it.isSink && it.type in HEADSET_TYPES }) claimMediaButtons("headset")
+        }
+    }
+
+    // When whatever was playing stops, the keys are nobody's: take them back. Not while it plays, or
+    // a pause on the earbuds would no longer reach the music.
+    private var othersWerePlaying = false
+    private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
+        override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
+            // Our own silent blip changes the playback too: that is not someone else stopping.
+            if (blip != null || System.currentTimeMillis() - claimedAt < BLIP_MS + RECLAIM_AFTER_MS) return
+            val playing = audio.isMusicActive
+            if (othersWerePlaying && !playing) {
+                handler.removeCallbacks(reclaim)
+                handler.postDelayed(reclaim, RECLAIM_AFTER_MS)
+            } else if (playing) {
+                handler.removeCallbacks(reclaim)
+            }
+            othersWerePlaying = playing
+        }
+    }
+    private val reclaim = Runnable { claimMediaButtons("idle") }
 
     // The spoken "I'm listening", fetched ahead from the server.
     private val cues by lazy {
@@ -103,20 +139,62 @@ class NexusBudsService : Service() {
                     override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean = onKey(mediaButtonIntent)
                 },
             )
-            // Playing for a moment is what puts this session first for the media keys; paused after it,
-            // nothing is shown as playing.
-            setPlaybackState(playback(PlaybackState.STATE_PLAYING))
+            setPlaybackState(playback(PlaybackState.STATE_PAUSED))
             isActive = true
         }
-        handler.postDelayed({ session.setPlaybackState(playback(PlaybackState.STATE_PAUSED)) }, 600)
+        claimMediaButtons("start")
+        audio.registerAudioDeviceCallback(deviceCallback, handler)
+        audio.registerAudioPlaybackCallback(playbackCallback, handler)
         cues.prefetch()
         Log.i(TAG, "buds_listening")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
+    /**
+     * Makes this session the one the earbuds' media keys go to: playing, with a moment of real (silent)
+     * audio, because the system gives the keys to the app that last played audio. Not while something
+     * else is playing (its keys are its own), and not more often than [CLAIM_EVERY_MS].
+     */
+    private fun claimMediaButtons(why: String) {
+        if (!::session.isInitialized) return
+        val now = System.currentTimeMillis()
+        if (blip != null || now - claimedAt < CLAIM_EVERY_MS) return
+        if (audio.isMusicActive) {
+            Log.i(TAG, "buds_claim_skipped why=$why (something is playing)")
+            return
+        }
+        claimedAt = now
+        session.setPlaybackState(playback(PlaybackState.STATE_PLAYING))
+        blip = SilentBlip.play()
+        Log.i(TAG, "buds_claim why=$why audio=${blip != null}")
+        handler.postDelayed({
+            blip?.let { runCatching { it.stop() }; runCatching { it.release() } }
+            blip = null
+            session.setPlaybackState(playback(PlaybackState.STATE_PAUSED))
+        }, BLIP_MS)
+    }
+
+    /** A key that is not Nexus's: let it go where it would have gone if Nexus were not here. */
+    private fun passThrough(event: KeyEvent) {
+        if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount != 0) return
+        Log.i(TAG, "buds_key_passed ${KeyEvent.keyCodeToString(event.keyCode)}")
+        // Out of the way for a moment; the matching key-up then goes to the same place as the key-down.
+        session.isActive = false
+        audio.dispatchMediaKeyEvent(event)
+        handler.postDelayed({
+            session.isActive = true
+            claimedAt = 0L
+            claimMediaButtons("after pass")
+        }, PASS_MS)
+    }
+
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        runCatching { audio.unregisterAudioDeviceCallback(deviceCallback) }
+        runCatching { audio.unregisterAudioPlaybackCallback(playbackCallback) }
+        blip?.let { runCatching { it.release() } }
+        blip = null
         if (::session.isInitialized) {
             runCatching { session.isActive = false }
             runCatching { session.release() }
@@ -152,7 +230,10 @@ class NexusBudsService : Service() {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP,
             -> Tap.Single
-            else -> return false
+            else -> {
+                passThrough(event)
+                return true
+            }
         }
         // With the app's Home screen in front it takes the tap and shows the turn; this runs it only in the background.
         if (appTakesTap(tap, NexusBudsBridge.resumed, NexusBudsBridge.homeReady, NexusBudsBridge.busy)) {
@@ -162,7 +243,10 @@ class NexusBudsService : Service() {
         }
         val action = budsAction(tap, phase)
         Log.i(TAG, "buds_key key=${KeyEvent.keyCodeToString(event.keyCode)} act=${event.action} phase=$phase -> $action")
-        if (action == BudsAction.Ignore) return false
+        if (action == BudsAction.Ignore) {
+            passThrough(event)
+            return true
+        }
         // The key goes down and comes up: act on the press, swallow the release.
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) act(action)
         return true
@@ -289,6 +373,24 @@ class NexusBudsService : Service() {
 
         /** A conversation is kept for this long after the last turn; a double tap later starts a new one. */
         const val CONVERSATION_MS = 10 * 60_000L
+
+        /** The silent audio that claims the media keys, and how soon after other playback stops they are claimed back. */
+        const val BLIP_MS = 700L
+        const val RECLAIM_AFTER_MS = 2_000L
+        const val CLAIM_EVERY_MS = 3_000L
+
+        /** How long Nexus stays out of the way while a key it does not want is dispatched on. */
+        const val PASS_MS = 1_200L
+
+        val HEADSET_TYPES = setOf(
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET,
+            AudioDeviceInfo.TYPE_HEARING_AID,
+            AudioDeviceInfo.TYPE_WIRED_HEADSET,
+            AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+        )
     }
 }
 
