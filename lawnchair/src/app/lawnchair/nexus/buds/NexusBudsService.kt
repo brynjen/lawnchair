@@ -81,11 +81,7 @@ class NexusBudsService : Service() {
         )
     }
 
-    private fun followConversation(id: Int?) {
-        if (id == null) return
-        getSharedPreferences("NexusReports", Context.MODE_PRIVATE).edit().putInt("conversation", id).apply()
-        reports.watch(id)
-    }
+    private fun followConversation(id: Int?) = reports.watch(id)
 
     private val audio by lazy { getSystemService(AudioManager::class.java) }
     private var blip: AudioTrack? = null
@@ -160,8 +156,10 @@ class NexusBudsService : Service() {
             isActive = true
         }
         claimMediaButtons("start")
+        // Reports are followed while the person is using Nexus and a while after, not from the moment the
+        // service starts: a standing connection is what drains the battery.
         NexusBudsBridge.onConversation = { id -> handler.post { reports.watch(id) } }
-        reports.watch(getSharedPreferences("NexusReports", Context.MODE_PRIVATE).getInt("conversation", 0).takeIf { it > 0 })
+        NexusBudsBridge.onLeft = { handler.post { reports.keepFollowing() } }
         audio.registerAudioDeviceCallback(deviceCallback, handler)
         audio.registerAudioPlaybackCallback(playbackCallback, handler)
         cues.prefetch()
@@ -211,6 +209,7 @@ class NexusBudsService : Service() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         NexusBudsBridge.onConversation = null
+        NexusBudsBridge.onLeft = null
         reports.stop()
         runCatching { audio.unregisterAudioDeviceCallback(deviceCallback) }
         runCatching { audio.unregisterAudioPlaybackCallback(playbackCallback) }

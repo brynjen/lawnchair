@@ -20,6 +20,8 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Whether there is a network, as the system tells of it changing (the News header's dot, NexusNetwork). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Nexus voice: microphone capture for push-to-talk (requested at runtime on first mic use). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The embedded Nexus app (NexusAppActivity): Bluetooth (Android 12+ split scan/connect,

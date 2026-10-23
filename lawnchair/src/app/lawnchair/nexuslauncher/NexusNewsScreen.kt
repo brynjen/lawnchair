@@ -85,6 +85,7 @@ import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.NexusLock
 import app.lawnchair.nexus.NexusLockNudge
 import app.lawnchair.nexus.net.NexusClient
+import app.lawnchair.nexus.net.networkUp
 import app.lawnchair.nexus.news.NewsCache
 import app.lawnchair.nexus.news.NewsClaim
 import app.lawnchair.nexus.news.NewsFeed
@@ -160,9 +161,14 @@ private fun systemDark(context: android.content.Context): Boolean =
  * dismissable. [onClose] closes the whole panel. A pull-to-refresh asks the server to sweep its
  * sources and drives the orb's loading animation. [onDark] is told whether the page is dark (it follows
  * the person's theme), for the status bar.
+ *
+ * The panel is composed for as long as the launcher lives, parked off screen. [open] says whether any of
+ * it is on screen: only then does it read the app's config, ask the server for the feed or watch the
+ * network. Closed, it does nothing, and the battery is not spent on a page nobody is looking at.
  */
 @Composable
 fun NexusNewsScreen(
+    open: Boolean,
     onClose: () -> Unit,
     onDark: (Boolean) -> Unit = {},
     onDiscuss: (NewsItem) -> Unit = {},
@@ -172,7 +178,8 @@ fun NexusNewsScreen(
     // Whether the Nexus app is signed in and set up, and whether it (or, on System, the phone) is
     // dark, re-read while the panel is open: signing in lets the news in, and a change of theme
     // repaints it, without closing it. Until signed in nothing of the news shows.
-    val gate by produceState(NewsGate(NexusLock.NeedsSignIn, "", "", dark = true)) {
+    val gate by produceState(NewsGate(NexusLock.NeedsSignIn, "", "", dark = true), open) {
+        if (!open) return@produceState
         while (true) {
             value = withContext(Dispatchers.IO) {
                 NexusConfig.read(context).let {
@@ -212,7 +219,7 @@ fun NexusNewsScreen(
                 } else {
                     // Everything the page holds (the feed, the search, the open article) is one person's
                     // on one server: signing out or in as someone else starts it over.
-                    key(gate.serverUrl, gate.authKey) { NewsPanel(gate.serverUrl, gate.authKey, onClose, onDiscuss, onAsk) }
+                    key(gate.serverUrl, gate.authKey) { NewsPanel(open, gate.serverUrl, gate.authKey, onClose, onDiscuss, onAsk) }
                 }
             }
         }
@@ -221,6 +228,7 @@ fun NexusNewsScreen(
 
 @Composable
 private fun NewsPanel(
+    open: Boolean,
     serverUrl: String,
     authKey: String,
     onClose: () -> Unit,
@@ -247,6 +255,7 @@ private fun NewsPanel(
     val listState = remember(section) { LazyListState() }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val online = rememberOnline(open)
     val transport = remember { NexusClient() }
     val news = remember {
         NewsRepository(transport, NewsCache(File(context.cacheDir, "nexus-news")), serverUrl, authKey)
@@ -258,8 +267,10 @@ private fun NewsPanel(
     val now = remember(feed) { Instant.now() }
 
     // The saved copy first, so the page is never blank while the server answers; then the server,
-    // again every NEWS_REFRESH_MS. A failed read leaves what is shown as it is.
-    LaunchedEffect(news, section) {
+    // again every NEWS_REFRESH_MS. A failed read leaves what is shown as it is. Only while the panel is
+    // open: it reads the server each time it opens, and never while it is out of sight.
+    LaunchedEffect(news, section, open) {
+        if (!open) return@LaunchedEffect
         activeTag = null
         feed = news.saved(section.wire)
         while (true) {
@@ -300,6 +311,7 @@ private fun NewsPanel(
         // The server's answer to the words as they are now, if it has come.
         val hits = found?.takeIf { (words, _) -> words == query.trim() }?.second
         ListScreen(
+            online = online,
             listState = listState,
             items = (hits ?: feed)?.items,
             serverHits = hits != null,
@@ -403,6 +415,7 @@ private fun LockedScreen(lock: NexusLock, onClose: () -> Unit) {
 
 @Composable
 private fun ListScreen(
+    online: Boolean,
     listState: LazyListState,
     items: List<NewsItem>?,
     /** [items] are the server's answer to [query]: they are not filtered again here. */
@@ -440,7 +453,7 @@ private fun ListScreen(
             .swipeToDismiss(toRight = false, onDismiss = onClose),
     ) {
         // The orb loads for a pull and for the very first look, when there is nothing else to show.
-        Header(refreshing || items == null)
+        Header(refreshing || items == null, online)
         SearchField(query, onQuery)
         Spacer(Modifier.height(12.dp))
         SectionRow(section, onSection)
@@ -530,32 +543,27 @@ private fun RefreshNotePill(note: RefreshNote, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Whether the phone has a network, for as long as the panel is [active]. The system tells of each
+ * change, so nothing is polled, and nothing is registered while the panel is closed; it is read again
+ * on opening.
+ */
 @Composable
-private fun Header(loading: Boolean) {
-    // Live connection dot: while the News overlay is on screen, actively poll the server
-    // (this is the one place active polling is allowed — the user is looking at dynamic content).
-    // teal = online, red = offline/unreachable, grey = not configured / unknown. The effect is
-    // cancelled automatically when the overlay leaves composition, so it never polls in the
-    // background.
+private fun rememberOnline(active: Boolean): Boolean {
     val context = LocalContext.current
-    var online by remember { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(Unit) {
-        val client = NexusClient()
-        while (true) {
-            val status = withContext(Dispatchers.IO) { NexusConfig.read(context) }
-            online = if (status.enabled) {
-                withContext(Dispatchers.IO) { client.ping(status.serverUrl, status.authKey) }
-            } else {
-                null
-            }
-            delay(10_000)
-        }
+    val online by produceState(initialValue = true, active) {
+        if (!active) return@produceState
+        networkUp(context).collect { value = it }
     }
-    val dotColor = when (online) {
-        true -> Good
-        false -> Color(0xFFFF6B6B)
-        null -> Text3
-    }
+    return online
+}
+
+@Composable
+private fun Header(loading: Boolean, online: Boolean) {
+    // The connection dot: teal while the phone has a network, red when it has none. The panel only
+    // shows for a signed-in person, so that is the whole state until the server can say, in a
+    // notification, that it is down (it will turn the dot red then); the dot does not ask the server.
+    val dotColor = if (online) Good else Color(0xFFFF6B6B)
     Column(Modifier.fillMaxWidth().padding(16.dp, 12.dp, 16.dp, 0.dp)) {
         Box(Modifier.fillMaxWidth()) {
             Text(

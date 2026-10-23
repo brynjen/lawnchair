@@ -20,6 +20,9 @@ object NexusBudsBridge {
     /** Told the conversation the app is on, so the service follows it for reports ([NexusReportWatcher]). */
     @Volatile var onConversation: ((Int) -> Unit)? = null
 
+    /** Told when the app leaves the front, so the service follows that conversation a while longer. */
+    @Volatile var onLeft: (() -> Unit)? = null
+
     /** Passes [tap] to the app if it is to take it. True when it did. */
     fun forward(tap: Tap): Boolean {
         val line = channel ?: return false

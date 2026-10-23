@@ -3,6 +3,7 @@ package app.lawnchair.nexuslauncher
 import android.animation.ValueAnimator
 import android.view.View
 import android.view.ViewGroup
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.core.view.WindowCompat
 import app.lawnchair.LawnchairLauncher
@@ -28,6 +29,11 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
     private var panel: View? = null
     private var attached = false
     private var progress = 0f
+
+    // Whether any of the panel is on screen. The panel stays composed beside the home screen, parked
+    // off to the left, so everything that costs battery in it (the server calls, the orb's render
+    // thread) is told to run only while this is true.
+    private val open = mutableStateOf(false)
     private var flingVelocity = 0f
     private var settleAnim: ValueAnimator? = null
 
@@ -66,6 +72,7 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
         val v = ComposeView(launcher).apply {
             setContent {
                 NexusNewsScreen(
+                    open = open.value,
                     onClose = { animateTo(0f) },
                     onDark = {
                         panelDark = it
@@ -126,6 +133,10 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
 
     private fun applyProgressToPanel() {
         panel?.translationX = -panelWidth * (1f - progress)
+        open.value = progress > 0f
+        // Invisible stops the orb's render thread, which a view parked off screen but visible would keep
+        // drawing at the display's rate; the panel still has its size, so it opens without a measure.
+        panel?.visibility = if (progress > 0f) View.VISIBLE else View.INVISIBLE
         applyStatusBar()
     }
 
@@ -165,6 +176,7 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
         settleAnim?.cancel()
         (panel?.parent as? ViewGroup)?.removeView(panel)
         panel = null
+        open.value = false
         applyStatusBar()
         attached = false
     }
