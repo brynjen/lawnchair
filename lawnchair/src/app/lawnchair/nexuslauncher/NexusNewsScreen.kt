@@ -2,8 +2,6 @@ package app.lawnchair.nexuslauncher
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,7 +44,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -64,7 +61,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -100,8 +96,6 @@ import app.lawnchair.nexus.news.matches
 import app.lawnchair.nexus.news.quickQuestions
 import app.lawnchair.nexus.news.plus
 import app.lawnchair.nexus.news.NewsPictures
-import app.lawnchair.nexus.news.RefreshResult
-import app.lawnchair.nexus.news.message
 import app.lawnchair.nexus.news.NewsRepository
 import app.lawnchair.nexus.news.agoText
 import app.lawnchair.nexus.news.newsTags
@@ -131,11 +125,6 @@ private val OnAccent: Color @Composable get() = LocalNexusColors.current.onAccen
 private val AccentInk: Color
     @Composable get() = LocalNexusColors.current.let { if (it.isDark) it.accent else it.accentDeep }
 
-/** What a refresh says under the tag row, and for how long. */
-private class RefreshNote(val text: String, val problem: Boolean) // not a data class: each refresh is a new note, even with the same words
-
-private const val NOTE_MS = 4_000L
-
 /** How often the feed is read again while the launcher lives; a nightly sweep makes this plenty. */
 private const val NEWS_REFRESH_MS = 15 * 60_000L
 
@@ -158,8 +147,8 @@ private fun systemDark(context: android.content.Context): Boolean =
 /**
  * The Nexus News "-1" panel: the server's news feed (each card links out to its source), shown from
  * the copy the phone saved of it while the server is asked again. Each sub-view is swipe-left
- * dismissable. [onClose] closes the whole panel. A pull-to-refresh asks the server to sweep its
- * sources and drives the orb's loading animation. [onDark] is told whether the page is dark (it follows
+ * dismissable. [onClose] closes the whole panel. The server reads its sources overnight, so there is
+ * no pull-to-refresh: the page reads what is filed. [onDark] is told whether the page is dark (it follows
  * the person's theme), for the status bar.
  *
  * The panel is composed for as long as the launcher lives, parked off screen. [open] says whether any of
@@ -240,10 +229,6 @@ private fun NewsPanel(
     var section by remember { mutableStateOf(NewsSection.Now) }
     var loadingMore by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<NewsItem?>(null) }
-    var refreshing by remember { mutableStateOf(false) }
-    // What the last pull-to-refresh came to, said for a few seconds under the tag row.
-    var note by remember { mutableStateOf<RefreshNote?>(null) }
-    var noteVisible by remember { mutableStateOf(false) }
     // Null only until the saved copy or the first answer; after that the page always has a feed to
     // show, an empty one when there is nothing saved and no network.
     var feed by remember { mutableStateOf<NewsFeed?>(null) }
@@ -271,7 +256,6 @@ private fun NewsPanel(
     // open: it reads the server each time it opens, and never while it is out of sight.
     LaunchedEffect(news, section, open) {
         if (!open) return@LaunchedEffect
-        activeTag = null
         feed = news.saved(section.wire)
         while (true) {
             feed = news.load(section.wire) ?: feed ?: NewsFeed.EMPTY
@@ -279,8 +263,12 @@ private fun NewsPanel(
         }
     }
 
-    // Another section is another search.
-    LaunchedEffect(section) { found = null }
+    // Another section is another search, and has tags of its own. Closing and opening the panel is not
+    // a change of section: the chosen tag (like the words in the search box) is there when it opens again.
+    LaunchedEffect(section) {
+        found = null
+        activeTag = null
+    }
 
     // New words are a new list: from the top.
     LaunchedEffect(query) { listState.scrollToItem(0) }
@@ -295,13 +283,6 @@ private fun NewsPanel(
         }
         delay(SEARCH_DEBOUNCE_MS)
         news.search(section.wire, words)?.let { found = words to it }
-    }
-
-    LaunchedEffect(note) {
-        if (note != null) {
-            delay(NOTE_MS)
-            noteVisible = false
-        }
     }
 
     val article = selected
@@ -322,23 +303,6 @@ private fun NewsPanel(
             onQuery = { query = it },
             activeTag = activeTag,
             onTag = { activeTag = it },
-            refreshing = refreshing,
-            note = note,
-            noteVisible = noteVisible,
-            onRefresh = {
-                scope.launch {
-                    refreshing = true
-                    val result = news.sweep(feed, section.wire)
-                    feed = when (result) {
-                        is RefreshResult.New -> result.feed
-                        is RefreshResult.UpToDate -> result.feed
-                        RefreshResult.Unreachable -> feed ?: NewsFeed.EMPTY
-                    }
-                    refreshing = false
-                    note = RefreshNote(result.message(), problem = result is RefreshResult.Unreachable)
-                    noteVisible = true
-                }
-            },
             section = section,
             onSection = { section = it },
             canLoadMore = (hits ?: feed)?.nextCursor != null,
@@ -427,10 +391,6 @@ private fun ListScreen(
     onQuery: (String) -> Unit,
     activeTag: String?,
     onTag: (String?) -> Unit,
-    refreshing: Boolean,
-    note: RefreshNote?,
-    noteVisible: Boolean,
-    onRefresh: () -> Unit,
     section: NewsSection,
     onSection: (NewsSection) -> Unit,
     canLoadMore: Boolean,
@@ -452,94 +412,51 @@ private fun ListScreen(
             .windowInsetsPadding(WindowInsets.systemBars)
             .swipeToDismiss(toRight = false, onDismiss = onClose),
     ) {
-        // The orb loads for a pull and for the very first look, when there is nothing else to show.
-        Header(refreshing || items == null, online)
+        // The orb loads for the very first look, when there is nothing else to show.
+        Header(items == null, online)
         SearchField(query, onQuery)
         Spacer(Modifier.height(12.dp))
         SectionRow(section, onSection)
         Spacer(Modifier.height(10.dp))
         TagRow(tags, tag, onTag)
         Spacer(Modifier.height(8.dp))
-        // The note floats over the top of the list, so it never pushes a card down.
-        Box(Modifier.fillMaxSize()) {
-            PullToRefreshBox(
-                isRefreshing = refreshing,
-                onRefresh = onRefresh,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    item(key = "eir") { EirCard() }
-                    if (items != null && filtered.isEmpty()) {
-                        item(key = "empty") {
-                            Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
-                                Text(
-                                    if (query.isBlank()) {
-                                        when (section) {
-                                            NewsSection.Papers -> "No papers yet.\nThe box reads them overnight."
-                                            else -> "No news right now.\nPull down to refresh."
-                                        }
-                                    } else {
-                                        "Nothing matches \"$query\"."
-                                    },
-                                    style = TextStyle(color = Text3, fontSize = 15.sp),
-                                )
-                            }
-                        }
-                    }
-                    items(filtered, key = { it.id }) { NewsCard(it, now, pictures, query, onDiscuss = { onDiscuss(it) }) { onOpen(it) } }
-                    if (canLoadMore) {
-                        item(key = "more") {
-                            // Composed only when the list reaches its end: that asks for the next page.
-                            LaunchedEffect(Unit) { onLoadMore() }
-                            Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                                Text(
-                                    if (loadingMore) "Loading more…" else "",
-                                    style = TextStyle(color = Text3, fontSize = 13.sp),
-                                )
-                            }
-                        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (items != null && filtered.isEmpty()) {
+                item(key = "empty") {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (query.isBlank()) {
+                                when (section) {
+                                    NewsSection.Papers -> "No papers yet.\nThe box reads them overnight."
+                                    else -> "No news right now.\nThe box reads the news overnight."
+                                }
+                            } else {
+                                "Nothing matches \"$query\"."
+                            },
+                            style = TextStyle(color = Text3, fontSize = 15.sp),
+                        )
                     }
                 }
             }
-            // Fades in and out; the last note is kept while it fades.
-            val noteAlpha by animateFloatAsState(
-                targetValue = if (noteVisible) 1f else 0f,
-                animationSpec = tween(if (noteVisible) 200 else 600),
-                label = "refreshNote",
-            )
-            if (note != null && noteAlpha > 0f) {
-                RefreshNotePill(
-                    note,
-                    Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 8.dp)
-                        .graphicsLayer { alpha = noteAlpha },
-                )
+            items(filtered, key = { it.id }) { NewsCard(it, now, pictures, query, onDiscuss = { onDiscuss(it) }) { onOpen(it) } }
+            if (canLoadMore) {
+                item(key = "more") {
+                    // Composed only when the list reaches its end: that asks for the next page.
+                    LaunchedEffect(Unit) { onLoadMore() }
+                    Box(Modifier.fillMaxWidth().padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
+                        Text(
+                            if (loadingMore) "Loading more…" else "",
+                            style = TextStyle(color = Text3, fontSize = 13.sp),
+                        )
+                    }
+                }
             }
         }
-    }
-}
-
-@Composable
-private fun RefreshNotePill(note: RefreshNote, modifier: Modifier = Modifier) {
-    val colors = LocalNexusColors.current
-    val shape = RoundedCornerShape(99.dp)
-    Row(
-        modifier
-            .clip(shape)
-            .background(colors.surface3)
-            .border(1.dp, colors.borderStrong, shape)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(6.dp).clip(CircleShape).background(if (note.problem) colors.warn else colors.good))
-        Spacer(Modifier.width(8.dp))
-        Text(note.text, style = TextStyle(color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Medium))
     }
 }
 

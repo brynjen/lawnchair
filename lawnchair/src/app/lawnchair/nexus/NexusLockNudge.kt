@@ -6,7 +6,7 @@ import android.widget.Toast
 /**
  * What the launcher says, and does, when the Nexus app is not ready to be used from here: the
  * sentence for each [NexusLock], and opening the app where the missing step is. Shared by the bar,
- * the mic, News and the Eir card so the phone has one way of saying it.
+ * the mic and News so the phone has one way of saying it.
  */
 object NexusLockNudge {
 

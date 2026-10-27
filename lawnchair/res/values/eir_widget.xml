@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Eir home-screen widget (EirWidgetProvider). nexus_mobile's light tokens (lib/core/tokens.dart);
+     a widget inflates with the launcher's configuration, so values-night follows its night mode. -->
+<resources>
+    <color name="eir_widget_surface">#FFFFFFFF</color>
+    <color name="eir_widget_border">#140A0A12</color>
+    <color name="eir_widget_text">#FF0A0A12</color>
+    <color name="eir_widget_text2">#9E0A0A12</color>
+    <color name="eir_widget_text3">#610A0A12</color>
+    <color name="eir_widget_accent">#FF4A90E2</color>
+    <color name="eir_widget_good">#FF5EEAD4</color>
+    <color name="eir_widget_warn">#FFF5C475</color>
+    <color name="eir_widget_bad">#FFF87171</color>
+
+    <string name="eir_widget_label">Eir</string>
+    <string name="eir_widget_description">Eir, your health coach: today\'s readiness and the check-ins waiting.</string>
+    <string name="eir_widget_open">Open Eir</string>
+    <string name="eir_widget_no_data">Not enough data yet.</string>
+    <string name="eir_widget_check_in">1 check-in</string>
+    <string name="eir_widget_check_ins">%d check-ins</string>
+</resources>

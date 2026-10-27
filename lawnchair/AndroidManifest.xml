@@ -251,6 +251,18 @@
             android:foregroundServiceType="dataSync" />
 
         <receiver
+            android:name="app.lawnchair.nexus.coach.EirWidgetProvider"
+            android:exported="false"
+            android:label="@string/eir_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/eir_widget_info" />
+        </receiver>
+
+        <receiver
             android:name="app.lawnchair.smartspace.SmartspaceAppWidgetProvider"
             android:exported="false">
             <intent-filter>

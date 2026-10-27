@@ -6,7 +6,7 @@ import android.database.Cursor
 import android.net.Uri
 
 /**
- * Why the Nexus bar, voice, News, the Eir card and the widgets are (not) usable. The launcher
+ * Why the Nexus bar, voice, News, the Eir widget and the widgets are (not) usable. The launcher
  * does nothing for the person until the app has a server, a signed-in person and finished
  * onboarding for that person; each lock names the step that is missing.
  */

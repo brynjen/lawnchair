@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- nexus_mobile's dark tokens (lib/core/tokens.dart). -->
+<resources>
+    <color name="eir_widget_surface">#FF14141E</color>
+    <color name="eir_widget_border">#12FFFFFF</color>
+    <color name="eir_widget_text">#FFF0F0F5</color>
+    <color name="eir_widget_text2">#9EF0F0F5</color>
+    <color name="eir_widget_text3">#61F0F0F5</color>
+    <color name="eir_widget_accent">#FF7AB8FF</color>
+</resources>

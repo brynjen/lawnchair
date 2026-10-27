@@ -10,7 +10,7 @@ import kotlinx.coroutines.withContext
 import no.nordli.nexus.health.sync.net.CoachClient
 
 /**
- * What the launcher's Eir card shows: the coach's word for today and how many of its check-ins are
+ * What the launcher's Eir widget shows: the coach's word for today and how many of its check-ins are
  * waiting. Read over the sealed coach route with `health_sync`'s Kotlin client, which the Nexus
  * app's AAR already puts in this APK (`seal/SealedPayload.kt`, `net/CoachClient.kt` under
  * nexus-health/packages/health_sync/android, linked, not copied).
