@@ -4,6 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.EaseInCubic
 import androidx.compose.animation.core.EaseOutCubic
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -11,6 +14,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -54,7 +59,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +97,11 @@ private const val ANIM_IN_MS = 260
 private const val ANIM_OUT_MS = 220
 private const val SCRIM_ALPHA = 0.72f
 
+/** The discussion sheet: how much of the screen it covers, how dim the page behind it goes, how far a drag lets it go. */
+private const val SHEET_HEIGHT = 0.9f
+private const val SHEET_SCRIM_ALPHA = 0.55f
+private val SHEET_DISMISS_DRAG = 96.dp
+
 /**
  * The home-screen-integrated Nexus chat. Layers over the (partially dimmed) launcher: a gradient
  * scrim that dims only the region we use, the neural orb (top-left in Text mode, centered + enlarged
@@ -111,25 +125,34 @@ fun NexusChatScreen(
         }
     }
 
+    // A chat about one thing (the News page's Discuss button) is a bottom sheet over the page.
+    val sheet = state.mode != Mode.Voice && controller.subject != null
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            // Swipe right to close (independent of the OS back-gesture config).
-            .pointerInput(Unit) {
-                var total = 0f
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        if (total > 140f) controller.dismiss()
-                        total = 0f
-                    },
-                    onDragCancel = { total = 0f },
-                ) { _, dragAmount -> total += dragAmount }
-            },
+            // Swipe right to close (independent of the OS back-gesture config); a sheet is dragged down.
+            .then(
+                if (sheet) {
+                    Modifier
+                } else {
+                    Modifier.pointerInput(Unit) {
+                        var total = 0f
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (total > 140f) controller.dismiss()
+                                total = 0f
+                            },
+                            onDragCancel = { total = 0f },
+                        ) { _, dragAmount -> total += dragAmount }
+                    }
+                },
+            ),
     ) {
-        if (state.mode == Mode.Voice) {
-            VoiceLayout(state, controller, appear.value)
-        } else {
-            TextLayout(state, controller, appear.value, statusBarTopPx)
+        when {
+            state.mode == Mode.Voice -> VoiceLayout(state, controller, appear.value)
+            sheet -> SheetLayout(state, controller, appear.value)
+            else -> TextLayout(state, controller, appear.value, statusBarTopPx)
         }
     }
 }
@@ -223,6 +246,140 @@ private fun BoxScope.TextLayout(
     ) {
         // Fill the backing so the orb's sphere reads large (the composable has internal glow margin).
         ChatOrb(controller, state.phase, state.failureSignal, Modifier.fillMaxSize())
+    }
+}
+
+/**
+ * The chat about one thing, the News page's Discuss button, as a bottom sheet: the page behind stays,
+ * dimmed, and the sheet rises from the bottom edge with a grab handle, a header that says what is
+ * discussed, the conversation and the composer. Drag the header down, tap the dimmed page, press the
+ * close button or go back to dismiss it; the keyboard lifts the whole sheet.
+ */
+@Composable
+private fun BoxScope.SheetLayout(
+    state: NexusChatUiState,
+    controller: NexusChatController,
+    appear: Float,
+) {
+    val title = controller.subject?.title.orEmpty()
+    val dismissAt = with(LocalDensity.current) { SHEET_DISMISS_DRAG.toPx() }
+    var dragging by remember { mutableStateOf(false) }
+    var dragPx by remember { mutableStateOf(0f) }
+    // Follows the finger exactly while it is down; springs back when the sheet is let go short of
+    // the threshold. A dismissed sheet stays where the finger left it and slides out from there.
+    val offset by animateFloatAsState(
+        targetValue = if (dragging) dragPx else 0f,
+        animationSpec = if (dragging) snap() else spring(),
+        label = "sheetDrag",
+    )
+    // Asking a question under the article answers at once; the keyboard waits for a tap then.
+    val raiseKeyboard = remember { state.messages.isEmpty() }
+    val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { alpha = appear }
+            .background(Color.Black.copy(alpha = SHEET_SCRIM_ALPHA))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = { controller.dismiss() },
+            ),
+    )
+
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .imePadding()
+            .fillMaxHeight(SHEET_HEIGHT)
+            .graphicsLayer { translationY = size.height * (1f - appear) + offset }
+            .clip(shape)
+            .background(Surface)
+            .border(1.dp, BorderC, shape)
+            // The sheet takes the taps that land on it, so only the dimmed page behind it closes it.
+            .pointerInput(Unit) { detectTapGestures { } },
+    ) {
+        // Grab handle and header: the part of the sheet that is dragged.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = {
+                            dragPx = 0f
+                            dragging = true
+                        },
+                        onDragEnd = {
+                            if (dragPx > dismissAt) controller.dismiss() else dragging = false
+                        },
+                        onDragCancel = { dragging = false },
+                    ) { _, dragAmount -> dragPx = (dragPx + dragAmount).coerceAtLeast(0f) }
+                },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .size(width = 36.dp, height = 4.dp)
+                    .clip(CircleShape)
+                    .background(Text3),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, top = 2.dp, bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(40.dp)) {
+                    ChatOrb(controller, state.phase, state.failureSignal, Modifier.fillMaxSize())
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    BasicText(
+                        text = "DISCUSSING",
+                        style = TextStyle(color = Accent, fontSize = 10.sp, letterSpacing = 1.4.sp),
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    BasicText(
+                        text = title,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = TextStyle(color = TextC, fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Surface2)
+                        .semantics { contentDescription = "Close" }
+                        .clickable(role = Role.Button, onClick = { controller.dismiss() }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText(text = "✕", style = TextStyle(color = Text2, fontSize = 14.sp))
+                }
+            }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(BorderC))
+        }
+        Conversation(
+            state = state,
+            controller = controller,
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(top = 12.dp),
+        )
+        Box(Modifier.windowInsetsPadding(WindowInsets.navigationBars)) {
+            Composer(
+                input = state.input,
+                placeholder = if (state.phase == TurnPhase.AwaitingAnswer) "Answer Nexus…" else "Ask about this…",
+                enabled = state.phase != TurnPhase.Thinking && state.phase != TurnPhase.Speaking,
+                onInput = controller::onInput,
+                onSend = controller::send,
+                appear = 1f,
+                raiseKeyboard = raiseKeyboard,
+            )
+        }
     }
 }
 
@@ -357,14 +514,18 @@ private fun Composer(
     onInput: (String) -> Unit,
     onSend: () -> Unit,
     appear: Float,
+    raiseKeyboard: Boolean = true,
 ) {
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     // The keyboard is tied strictly to this field's presence: raise it when the composer enters
-    // (Text mode only — Voice mode has no composer), and hide it when the composer leaves.
+    // (Text mode only — Voice mode has no composer; a discussion that already asks a question
+    // leaves it down), and hide it when the composer leaves.
     DisposableEffect(Unit) {
-        focusRequester.requestFocus()
-        keyboard?.show()
+        if (raiseKeyboard) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
         onDispose { keyboard?.hide() }
     }
     Row(
