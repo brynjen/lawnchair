@@ -9,10 +9,10 @@ import com.android.launcher3.R
  * The Nexus chat-bar provider. Replaces the Google glyph on the bottom pill with the Nexus orb and
  * turns the QSB into the entry point to the Nexus assistant.
  *
- * It is a [QsbSearchProviderType.LOCAL] provider: tapping it does **not** launch an external app —
- * [app.lawnchair.qsb.LawnQsbLayout] intercepts the tap and opens the in-process Nexus chat overlay
- * when enabled, or shows the install/configure nudge when not. [launch] is only a fallback for entry
- * points that go through the provider directly.
+ * It is a [QsbSearchProviderType.LOCAL] provider: [app.lawnchair.qsb.LawnQsbLayout] handles the bar
+ * itself — the field is the launcher's own app search, the logo opens the Nexus app at Home and the
+ * mic opens the in-process voice overlay (or shows the install/configure nudge when the app is not
+ * set up). [launch] is only a fallback for entry points that go through the provider directly.
  */
 data object Nexus : QsbSearchProvider(
     id = "nexus",

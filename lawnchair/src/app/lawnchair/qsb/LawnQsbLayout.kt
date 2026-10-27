@@ -25,6 +25,7 @@ import app.lawnchair.preferences.preferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.preferences2.asState
 import app.lawnchair.preferences2.firstCached
+import app.lawnchair.nexus.NexusAppActivity
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.chat.MicGesture
 import app.lawnchair.nexus.chat.NexusChatOverlay
@@ -130,25 +131,28 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                         val actions = QsbActions(
                             onQsbClick = {
                                 val launcher = context.launcher
-                                if (searchProvider == Nexus) {
-                                    // Tap the text area → integrated text chat overlay (or a nudge
-                                    // when the Nexus app isn't installed/configured).
-                                    NexusChatOverlay.openText(launcher)
-                                } else {
-                                    launcher.lifecycleScope.launch {
-                                        if (prefs2.matchHotseatQsbStyle.firstCached()) {
-                                            val searchUiManager = launcher.appsView.searchUiManager
-                                            searchUiManager.setDirectFocus(true)
-                                            searchUiManager.editText?.showKeyboard()
-                                            launcher.animateToAllApps()
-                                        } else {
-                                            searchProvider.launch(launcher)
-                                        }
+                                launcher.lifecycleScope.launch {
+                                    if (searchProvider == Nexus) {
+                                        // The field is the launcher's own search (the drawer, its field
+                                        // on top and focused), whatever the hotseat style is.
+                                        AppSearch.launch(launcher)
+                                    } else if (prefs2.matchHotseatQsbStyle.firstCached()) {
+                                        val searchUiManager = launcher.appsView.searchUiManager
+                                        searchUiManager.setDirectFocus(true)
+                                        searchUiManager.editText?.showKeyboard()
+                                        launcher.animateToAllApps()
+                                    } else {
+                                        searchProvider.launch(launcher)
                                     }
                                 }
                             },
                             onQsbLongClick = ::openOptions,
-                            onStartIconClick = null,
+                            // The Nexus logo opens the Nexus app, at its Home screen.
+                            onStartIconClick = if (searchProvider == Nexus) {
+                                { context.startActivity(NexusAppActivity.homeIntent(context)) }
+                            } else {
+                                null
+                            },
                             onEndIconClick = { id ->
                                 runCatching {
                                     when {

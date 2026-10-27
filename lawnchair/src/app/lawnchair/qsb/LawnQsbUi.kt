@@ -199,8 +199,7 @@ fun rememberHotseatQsbState(
     themed: Boolean,
     showMic: Boolean,
     showLens: Boolean,
-    // The Nexus server has speech off (its GPU Max mode): the Nexus bar then has no mic at all, and
-    // the bar itself, which opens the text overlay, is the one way in.
+    // The Nexus server has speech off (its GPU Max mode): the Nexus bar then has no mic at all.
     nexusVoiceOff: Boolean = false,
 ): QsbState {
     val searchLabel = stringResource(R.string.label_search)
@@ -209,8 +208,8 @@ fun rememberHotseatQsbState(
 
     return remember(searchProvider, themed, showMic, showLens, nexusVoiceOff, searchLabel, voiceSearchLabel, lensLabel) {
         // Nexus chat bar: full-colour Nexus glyph on the left; a disabled camera (image input is a
-        // roadmap stub) and an active mic (push-to-talk) on the right. Tapping the bar opens the
-        // chat overlay (wired in LawnQsbLayout), not an app/provider launch.
+        // roadmap stub) and an active mic (push-to-talk) on the right. Tapping the bar is the
+        // launcher's own search and the logo opens the app (both wired in LawnQsbLayout).
         if (searchProvider == Nexus) {
             return@remember QsbState(
                 contentDescription = searchLabel,
@@ -508,8 +507,8 @@ fun QsbIcon(
                 if (pressGesture) {
                     Modifier.pointerInput(icon.id) {
                         awaitEachGesture {
-                            // Consume down/up so the parent bar's onQsbClick (→ open text) does NOT
-                            // also fire — otherwise a mic press opens both the voice and text overlays.
+                            // Consume down/up so the parent bar's onQsbClick (→ open search) does NOT
+                            // also fire — otherwise a mic press opens both the voice overlay and the drawer.
                             val down = awaitFirstDown(requireUnconsumed = false)
                             down.consume()
                             onPressDown!!.invoke()
