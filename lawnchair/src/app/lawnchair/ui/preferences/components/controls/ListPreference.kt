@@ -17,26 +17,29 @@
 package app.lawnchair.ui.preferences.components.controls
 
 import android.R as AndroidR
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.lawnchair.preferences.PreferenceAdapter
 import app.lawnchair.ui.ModalBottomSheetContent
 import app.lawnchair.ui.preferences.components.layout.PreferenceDivider
 import app.lawnchair.ui.preferences.components.layout.PreferenceTemplate
-import app.lawnchair.ui.util.addIf
+import app.lawnchair.ui.theme.LawnchairTheme
 import app.lawnchair.ui.util.bottomSheetHandler
+import app.lawnchair.ui.util.preview.PreferenceGroupPreviewContainer
+import app.lawnchair.ui.util.preview.PreviewLawnchair
+import com.android.launcher3.util.MSDLPlayerWrapper
+import com.google.android.msdl.data.model.MSDLToken
 
 @Composable
 fun <T> ListPreference(
@@ -48,9 +51,10 @@ fun <T> ListPreference(
     description: String? = null,
     endWidget: (@Composable () -> Unit)? = null,
 ) {
+    val value = adapter.state.value
     ListPreference(
         entries = entries,
-        value = adapter.state.value,
+        value = value,
         onValueChange = adapter::onChange,
         label = label,
         modifier = modifier,
@@ -60,7 +64,6 @@ fun <T> ListPreference(
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun <T> ListPreference(
     entries: List<ListPreferenceEntry<T>>,
@@ -76,56 +79,65 @@ fun <T> ListPreference(
     val currentDescription = description ?: entries
         .firstOrNull { it.value == value }
         ?.label?.invoke()
+    val mMSDLPlayerWrapper = MSDLPlayerWrapper.INSTANCE.get(LocalContext.current)
 
     PreferenceTemplate(
-        contentModifier = Modifier
-            .fillMaxHeight()
-            .padding(vertical = 16.dp)
-            .padding(start = 16.dp),
         title = { Text(text = label) },
-        description = { currentDescription?.let { Text(text = it) } },
+        modifier = modifier,
         enabled = enabled,
+        description = currentDescription?.let { { Text(text = it) } },
         endWidget = endWidget,
-        applyPaddings = false,
-        modifier = modifier.clickable(enabled) {
-            bottomSheetHandler.show {
-                ModalBottomSheetContent(
-                    title = { Text(label) },
-                    buttons = {
-                        OutlinedButton(
-                            onClick = { bottomSheetHandler.hide() },
-                            shapes = ButtonDefaults.shapes(),
-                        ) {
-                            Text(text = stringResource(id = AndroidR.string.cancel))
-                        }
-                    },
-                ) {
-                    LazyColumn {
-                        itemsIndexed(entries) { index, item ->
-                            if (index > 0) {
-                                PreferenceDivider(startIndent = 40.dp)
+        onClick = if (enabled) {
+            {
+                mMSDLPlayerWrapper.playToken(MSDLToken.TAP_MEDIUM_EMPHASIS)
+                bottomSheetHandler.show {
+                    ModalBottomSheetContent(
+                        title = { Text(label) },
+                        buttons = {
+                            OutlinedButton(
+                                onClick = { bottomSheetHandler.hide() },
+                                shapes = ButtonDefaults.shapes(),
+                            ) {
+                                Text(text = stringResource(id = AndroidR.string.cancel))
                             }
-                            PreferenceTemplate(
-                                enabled = item.enabled,
-                                title = { Text(item.label()) },
-                                modifier = Modifier.clickable(item.enabled) {
-                                    onValueChange(item.value)
-                                    bottomSheetHandler.hide()
-                                },
-                                startWidget = {
-                                    RadioButton(
-                                        selected = item.value == value,
-                                        onClick = null,
-                                        enabled = item.enabled,
-                                    )
-                                },
-                                endWidget = item.endWidget,
-                            )
+                        },
+                    ) {
+                        LazyColumn {
+                            itemsIndexed(entries) { index, item ->
+                                if (index > 0) {
+                                    PreferenceDivider(startIndent = 40.dp)
+                                }
+                                PreferenceTemplate(
+                                    enabled = item.enabled,
+                                    title = { Text(item.label()) },
+                                    onClick = {
+                                        mMSDLPlayerWrapper.playToken(MSDLToken.TAP_LOW_EMPHASIS)
+                                        if (item.enabled) {
+                                            onValueChange(item.value)
+                                            bottomSheetHandler.hide()
+                                        }
+                                    },
+                                    startWidget = {
+                                        RadioButton(
+                                            selected = item.value == value,
+                                            onClick = null,
+                                            enabled = item.enabled,
+                                        )
+                                    },
+                                    endWidget = item.endWidget,
+                                    colors = ListItemDefaults.colors(
+                                        containerColor = Color.Transparent,
+                                        disabledContainerColor = Color.Transparent,
+                                    ),
+                                )
+                            }
                         }
                     }
                 }
             }
-        }.addIf(endWidget != null) { padding(end = 16.dp) },
+        } else {
+            null
+        },
     )
 }
 
@@ -135,3 +147,24 @@ class ListPreferenceEntry<T>(
     val endWidget: (@Composable () -> Unit)? = null,
     val label: @Composable () -> String,
 )
+
+@PreviewLawnchair
+@Composable
+private fun ListPreferencePreview() {
+    val entries = listOf(
+        ListPreferenceEntry(value = "option1", label = { "Option 1" }),
+        ListPreferenceEntry(value = "option2", label = { "Option 2" }),
+        ListPreferenceEntry(value = "option3", label = { "Option 3" }, enabled = false),
+    )
+    LawnchairTheme {
+        PreferenceGroupPreviewContainer {
+            ListPreference(
+                entries = entries,
+                value = "option1",
+                onValueChange = {},
+                label = "List Preference",
+                description = "Description",
+            )
+        }
+    }
+}

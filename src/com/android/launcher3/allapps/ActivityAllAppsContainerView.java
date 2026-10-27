@@ -77,6 +77,7 @@ import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.DeviceProfile.OnDeviceProfileChangeListener;
 import com.android.launcher3.DragSource;
 import com.android.launcher3.DropTarget.DragObject;
+import com.android.launcher3.ExtendedEditText;
 import com.android.launcher3.Flags;
 import com.android.launcher3.Insettable;
 import com.android.launcher3.InsettableFrameLayout;
@@ -195,6 +196,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
 
     /** {@code true} when rendered view is in search state instead of the scroll state. */
     private boolean mIsSearching;
+    private boolean mSearchExitInProgress;
     boolean showFastScroller;
     private boolean mRebindAdaptersAfterSearchAnimation;
     private int mNavBarScrimHeight = 0;
@@ -424,10 +426,14 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         return mSearchContainer;
     }
 
-    /** Invoke when the current search session is finished. */
+    /** Clears displayed search results. */
     public void onClearSearchResult() {
         getMainAdapterProvider().clearHighlightedItem();
-        animateToSearchState(false);
+        ExtendedEditText editText = mSearchUiManager.getEditText();
+        // An empty, focused query is still an active search session.
+        boolean keepSearchFocus = editText != null && editText.isFocused()
+                && editText.getText().length() == 0;
+        animateToSearchState(false, DEFAULT_SEARCH_TRANSITION_DURATION_MS, keepSearchFocus);
         rebindAdapters();
     }
 
@@ -465,9 +471,15 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     void animateToSearchState(boolean goingToSearch, long durationMs) {
+        animateToSearchState(goingToSearch, durationMs, false);
+    }
+
+    private void animateToSearchState(boolean goingToSearch, long durationMs,
+            boolean keepSearchFocus) {
         if (!mSearchTransitionController.isRunning() && goingToSearch == isSearching()) {
             return;
         }
+        mSearchExitInProgress = !goingToSearch;
         mFastScroller.setVisibility(goingToSearch ? INVISIBLE : VISIBLE);
         if (goingToSearch) {
             // Fade out the button to pause work apps.
@@ -489,12 +501,14 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
 
                     if (goingToSearch) {
                         mSearchUiDelegate.onAnimateToSearchStateCompleted();
+                        mSearchExitInProgress = false;
                     } else {
                         setSearchResults(null);
                         if (mViewPager != null) {
                             mViewPager.setCurrentPage(previousPage);
                         }
-                        onActivePageChanged(previousPage);
+                        onActivePageChanged(previousPage, keepSearchFocus);
+                        mSearchExitInProgress = false;
                     }
                 });
     }
@@ -643,11 +657,15 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
 
     @Override
     public void onActivePageChanged(int currentActivePage) {
+        onActivePageChanged(currentActivePage, false);
+    }
+
+    private void onActivePageChanged(int currentActivePage, boolean keepSearchFocus) {
         if (mSearchTransitionController.isRunning()) {
             // Will be called at the end of the animation.
             return;
         }
-        if (currentActivePage != SEARCH) {
+        if (currentActivePage != SEARCH && !keepSearchFocus) {
             mActivityContext.hideKeyboard();
         }
         if (mAH.get(currentActivePage).mRecyclerView != null) {
@@ -656,7 +674,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         }
         // Header keeps track of active recycler view to properly render header protection.
         mHeader.setActiveRV(currentActivePage);
-        reset(true /* animate */, !isSearching() /* exitSearch */);
+        reset(true /* animate */, !isSearching() && !keepSearchFocus /* exitSearch */);
 
         mWorkManager.onActivePageChanged(currentActivePage);
     }
@@ -812,7 +830,10 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
 
         removeCustomRules(rvContainer);
         removeCustomRules(getSearchRecyclerView());
-        if (isSearchBarFloating()) {
+        if (isAppDrawerSearchBarHidden()) {
+            layoutWithoutSearchContainer(rvContainer, showTabs);
+            layoutWithoutSearchContainer(getSearchRecyclerView(), /* tabs= */ false);
+        } else if (isSearchBarFloating()) {
             alignParentTop(rvContainer, showTabs);
             alignParentTop(getSearchRecyclerView(), /* tabs= */ false);
         } else {
@@ -826,8 +847,9 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     void setupHeader() {
         mAdditionalHeaderRows.forEach(row -> mHeader.onPluginDisconnected(row));
 
-        var hideHeader = PreferenceCacheExtensionsKt.firstCached(pref2.getHideAppDrawerSearchBar());
-        mHeader.setVisibility(hideHeader ? View.GONE : View.VISIBLE);
+        boolean hideSearchBar = isAppDrawerSearchBarHidden();
+        // Keep personal/work tabs visible when search is off; only hide the empty header shell.
+        mHeader.setVisibility((hideSearchBar && !mUsingTabs) ? View.GONE : View.VISIBLE);
         boolean tabsHidden = !mUsingTabs;
         mHeader.setup(
                 mAH.get(AdapterHolder.MAIN).mRecyclerView,
@@ -836,7 +858,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
                 getCurrentPage(),
                 tabsHidden);
 
-        int padding = mHeader.getMaxTranslation();
+        int padding = (hideSearchBar && !mUsingTabs) ? 0 : mHeader.getMaxTranslation();
         mAH.forEach(adapterHolder -> {
             adapterHolder.mPadding.top = padding;
             adapterHolder.applyPadding();
@@ -847,7 +869,9 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         mAdditionalHeaderRows.forEach(row -> mHeader.onPluginConnected(row, mActivityContext));
 
         removeCustomRules(mHeader);
-        if (isSearchBarFloating()) {
+        if (hideSearchBar) {
+            layoutWithoutSearchContainer(mHeader, false /* includeTabsMargin */);
+        } else if (isSearchBarFloating()) {
             alignParentTop(mHeader, false /* includeTabsMargin */);
         } else {
             layoutBelowSearchContainer(mHeader, false /* includeTabsMargin */);
@@ -879,7 +903,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     protected void updateHeaderScroll(int scrolledOffset) {
-        if (PreferenceCacheExtensionsKt.firstCached(pref2.getHideAppDrawerSearchBar()))
+        if (isAppDrawerSearchBarHidden() && !mUsingTabs)
             return;
         
         // Check if tab container background should be shown
@@ -902,8 +926,25 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         }
 
         boolean bgVisible = mSearchUiManager.getBackgroundVisibility();
-        if (scrolledOffset == 0 && !isSearching()) {
-            bgVisible = true;
+        if (scrolledOffset == 0) {
+            if (!isSearching()) {
+                bgVisible = true;
+            }
+            // LC-Note: Match Pixel Launcher behavior by focusing
+            // and showing the keyboard on scroll to top
+            if (PreferenceCacheExtensionsKt.firstCached(pref2.getAutoShowKeyboardInDrawer())) {
+                boolean isControllerAnimating = mAllAppsTransitionController != null
+                        && (mAllAppsTransitionController.getProgress() > 0f
+                        || mAllAppsTransitionController.getAllAppScale().isAnimating());
+                boolean isSearchTransitioning = mSearchTransitionController.isRunning()
+                        || mSearchExitInProgress;
+                if (!isControllerAnimating && !isSearchTransitioning) {
+                    ExtendedEditText editText = mSearchUiManager.getEditText();
+                    if (editText != null && !editText.isFocused()) {
+                        editText.showKeyboard();
+                    }
+                }
+            }
         } else if (scrolledOffset > mHeaderThreshold) {
             bgVisible = false;
         }
@@ -1024,6 +1065,10 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         return dp.allAppsLeftRightMargin + dp.getAllAppsIconStartMargin(mActivityContext);
     }
 
+    private boolean isAppDrawerSearchBarHidden() {
+        return PreferenceCacheExtensionsKt.firstCached(pref2.getHideAppDrawerSearchBar());
+    }
+
     private void layoutBelowSearchContainer(View v, boolean includeTabsMargin) {
         if (!(v.getLayoutParams() instanceof RelativeLayout.LayoutParams)) {
             return;
@@ -1042,8 +1087,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     private void alignParentTop(View v, boolean includeTabsMargin) {
-        if (!(v.getLayoutParams() instanceof RelativeLayout.LayoutParams)
-                || PreferenceCacheExtensionsKt.firstCached(pref2.getHideAppDrawerSearchBar())) {
+        if (!(v.getLayoutParams() instanceof RelativeLayout.LayoutParams)) {
             return;
         }
 
@@ -1057,8 +1101,7 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
     }
 
     private void removeCustomRules(View v) {
-        if (!(v.getLayoutParams() instanceof RelativeLayout.LayoutParams)
-                || PreferenceCacheExtensionsKt.firstCached(pref2.getHideAppDrawerSearchBar())) {
+        if (!(v.getLayoutParams() instanceof RelativeLayout.LayoutParams)) {
             return;
         }
 
@@ -1066,6 +1109,26 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         layoutParams.removeRule(RelativeLayout.ABOVE);
         layoutParams.removeRule(RelativeLayout.ALIGN_TOP);
         layoutParams.removeRule(RelativeLayout.ALIGN_PARENT_TOP);
+    }
+
+    private void layoutWithoutSearchContainer(View v, boolean includeTabsMargin) {
+        if (!(v.getLayoutParams() instanceof RelativeLayout.LayoutParams)) {
+            return;
+        }
+
+        RelativeLayout.LayoutParams layoutParams = (LayoutParams) v.getLayoutParams();
+        layoutParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+        int topMargin = 0;
+        if (mActivityContext.getDeviceProfile().shouldShowAllAppsOnSheet()) {
+            // Clear the bottom-sheet drag handle when search is not reserving that space.
+            topMargin = getContext().getResources().getDimensionPixelSize(
+                    R.dimen.bottom_sheet_handle_area_height);
+        }
+        if (includeTabsMargin) {
+            topMargin += getContext().getResources().getDimensionPixelSize(
+                    R.dimen.all_apps_header_pill_height);
+        }
+        layoutParams.topMargin = topMargin;
     }
 
     protected BaseAllAppsAdapter<T> createAdapter(AlphabeticalAppsList<T> appsList) {
@@ -1387,7 +1450,9 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         } else {
             getSearchRecyclerView().setVisibility(GONE);
             getAppsRecyclerViewContainer().setVisibility(VISIBLE);
-            mHeader.setVisibility(VISIBLE);
+            // Keep the empty header shell hidden when search is off and there are no tabs.
+            mHeader.setVisibility(
+                    (isAppDrawerSearchBarHidden() && !mUsingTabs) ? View.GONE : View.VISIBLE);
         }
         if (mHeader.isSetUp()) {
             mHeader.setActiveRV(getCurrentPage());

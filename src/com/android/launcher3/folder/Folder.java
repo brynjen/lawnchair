@@ -102,12 +102,14 @@ import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.dagger.LauncherComponentProvider;
 import com.android.launcher3.dragndrop.DragController.DragListener;
 import com.android.launcher3.dragndrop.DragOptions;
+import com.android.launcher3.graphics.PathWrapper;
 import com.android.launcher3.graphics.ShapeDelegate;
 import com.android.launcher3.graphics.ThemeManager;
 import com.android.launcher3.logger.LauncherAtom.FromState;
 import com.android.launcher3.logger.LauncherAtom.ToState;
 import com.android.launcher3.logging.StatsLogManager;
 import com.android.launcher3.logging.StatsLogManager.StatsLogger;
+import com.android.launcher3.model.ModelWriter;
 import com.android.launcher3.model.data.FolderInfo;
 import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.model.data.WorkspaceItemFactory;
@@ -242,7 +244,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     @Thunk
     int mTargetRank, mPrevTargetRank, mEmptyCellRank;
 
-    private Path mClipPath;
+    private PathWrapper mClipPath;
 
     @ViewDebug.ExportedProperty(category = "launcher",
             mapping = {
@@ -337,6 +339,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         final int paddingLeftRight = dp.folderContentPaddingLeftRight;
 
         mBackground = DrawableTokens.RoundRectFolder.resolve(getContext());
+        mBackground.setColor(LawnchairUtilsKt.resolveFolderBackgroundColor(getContext()));
         var alpha = LawnchairUtilsKt.getFolderBackgroundAlpha(getContext());
         mBackground.setAlpha(alpha);
 
@@ -530,6 +533,17 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         return mInfo.container == ItemInfo.NO_ID;
     }
 
+    /**
+     * LC: App drawer folders live in Lawnchair's own database and are not part of the
+     * launcher model, so writing them through ModelWriter can collide with an unrelated
+     * workspace item sharing the same id and crash in checkItemInfoLocked (#7127).
+     * Returns null for drawer folders so callers only update the in-memory state.
+     */
+    @Nullable
+    private ModelWriter getModelWriter() {
+        return isInAppDrawer() ? null : mActivityContext.getModelWriter();
+    }
+
     @Override
     public void onDragEnd() {
         if (mIsExternalDrag && mIsDragInProgress) {
@@ -553,7 +567,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         if (DEBUG) {
             Log.d(TAG, "onBackKey newTitle=" + newTitle);
         }
-        mInfo.setTitle(newTitle, mActivityContext.getModelWriter());
+        mInfo.setTitle(newTitle, getModelWriter());
         mFolderIcon.onTitleChanged(newTitle);
 
         if (TextUtils.isEmpty(mInfo.title)) {
@@ -917,7 +931,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
 
                     if (updateAnimationFlag) {
                         mInfo.setOption(FolderInfo.FLAG_MULTI_PAGE_ANIMATION, true,
-                                mActivityContext.getModelWriter());
+                                getModelWriter());
                     }
                 }
             });
@@ -991,9 +1005,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
 
     @Override
     protected void handleClose(boolean animate) {
-        mIsOpen = false;
         mContent.setCanAnnouncePageDescriptionForFolder(false);
-
         if (!animate && mCurrentAnimator != null && mCurrentAnimator.isRunning()) {
             mCurrentAnimator.cancel();
         }
@@ -1027,6 +1039,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
 
     private void animateClosed() {
         if (mIsAnimatingClosed) {
+            cancelRunningAnimations();
             return;
         }
 
@@ -1083,6 +1096,8 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     }
 
     private void closeComplete(boolean wasAnimated) {
+        mIsOpen = false;
+
         // TODO: Clear all active animations.
         BaseDragLayer parent = (BaseDragLayer) getParent();
         if (parent != null) {
@@ -1091,12 +1106,15 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         mActivityContext.getDragController().removeDropTarget(this);
         clearFocus();
         if (mFolderIcon != null) {
+            // Settle first-page preview before revealing the icon to avoid a rearrange flash.
+            if (wasAnimated) {
+                mFolderIcon.onFolderClose(mContent.getCurrentPage());
+            }
             mFolderIcon.setVisibility(View.VISIBLE);
             mFolderIcon.setIconVisible(true);
             mFolderIcon.mFolderName.setTextVisibility(true);
             if (wasAnimated) {
                 mFolderIcon.animateBgShadowAndStroke();
-                mFolderIcon.onFolderClose(mContent.getCurrentPage());
                 if (mFolderIcon.hasDot()) {
                     mFolderIcon.animateDotScale(0f, 1f);
                 }
@@ -1122,32 +1140,17 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         setState(STATE_CLOSED);
         mContent.setCurrentPage(0);
 
-        // Expressive folder animations dim the workspace scrim and scale workspace/hotseat. When the
-        // folder is dismissed without running the close animation (e.g. launching an app), those
-        // effects are not cleared by FolderScrimAnimationListener — restore them here.
-        restoreLauncherAfterFolderDismissed();
-    }
-
-    /**
-     * Resets scrim and workspace/hotseat scale after folder is removed from the hierarchy.
-     */
-    private void restoreLauncherAfterFolderDismissed() {
-        if (!(mActivityContext instanceof Launcher launcher)) {
-            return;
+        if (Flags.enableExpressiveFolderExpansion()) {
+            FolderAnimationSpringBuilderManager.resetLauncherScale(mLauncherDelegate);
+            FolderAnimationSpringBuilderManager.resetScrimAndZoom(mLauncherDelegate);
         }
-        ScrimView scrim = launcher.getScrimView();
-        if (scrim != null) {
-            scrim.setAlpha(1f);
-            scrim.setScrimColors(
-                    launcher.getStateManager().getState().getWorkspaceScrimColor(launcher));
-        }
-        SCALE_PROPERTY.set(launcher.getWorkspace(), 1f);
-        SCALE_PROPERTY.set(launcher.getHotseat(), 1f);
     }
 
     @Override
     public boolean acceptDrop(DragObject d) {
-        return willAcceptItemType(d.dragInfo.itemType);
+        // LC: App drawer folders are not backed by the launcher model, so dropping
+        // into them would write through ModelWriter and crash (#7127).
+        return !isInAppDrawer() && willAcceptItemType(d.dragInfo.itemType);
     }
 
     public void onDragEnter(DragObject d) {
@@ -1345,7 +1348,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         if (getItemCount() <= mContent.itemsPerPage()) {
             // Show the animation, next time something is added to the folder.
             mInfo.setOption(FolderInfo.FLAG_MULTI_PAGE_ANIMATION, false,
-                    mActivityContext.getModelWriter());
+                    getModelWriter());
         }
     }
 
@@ -1363,7 +1366,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
             }
         }
 
-        if (!items.isEmpty()) {
+        if (!items.isEmpty() && !isInAppDrawer()) {
             mActivityContext.getModelWriter().moveItemsInDatabase(items, mInfo.id, 0);
         }
         if (!isBind && total > 1 /* no need to update if there's one icon */) {
@@ -1380,7 +1383,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     }
 
     public boolean isDropEnabled() {
-        return mState != STATE_ANIMATING;
+        return mState != STATE_ANIMATING && !isInAppDrawer();
     }
 
     private void centerAboutIcon() {
@@ -1644,7 +1647,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
         if (mContent.getPageCount() > 1) {
             // The animation has already been shown while opening the folder.
             mInfo.setOption(FolderInfo.FLAG_MULTI_PAGE_ANIMATION, true,
-                    mActivityContext.getModelWriter());
+                    getModelWriter());
         }
 
         if (!launcher.isInState(EDIT_MODE)) {
@@ -2013,7 +2016,7 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
      * rounded rect.
      */
     @Override
-    public void setClipPath(Path clipPath) {
+    public void setClipPath(PathWrapper clipPath) {
         mClipPath = clipPath;
         invalidate();
     }
@@ -2021,11 +2024,19 @@ public class Folder extends AbstractFloatingView implements ClipPathView, DragSo
     @Override
     protected void dispatchDraw(Canvas canvas) {
         if (mClipPath != null) {
+            // clipPath is non-null while clip reveal animation is playing
             int count = canvas.save();
-            canvas.clipPath(mClipPath);
+            canvas.clipPath(mClipPath.getPath());
             mBackground.draw(canvas);
+            if (!mIsAnimatingClosed) {
+                // If animating open, clip the content to the clip path to keep in bounds.
+                super.dispatchDraw(canvas);
+            }
             canvas.restoreToCount(count);
-            super.dispatchDraw(canvas);
+            if (mIsAnimatingClosed) {
+                // If animating closed, avoid clipping content as preview items protrude past clip.
+                super.dispatchDraw(canvas);
+            }
         } else {
             mBackground.draw(canvas);
             super.dispatchDraw(canvas);

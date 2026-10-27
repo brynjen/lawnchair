@@ -3,9 +3,11 @@ package app.lawnchair.qsb
 import android.content.Context
 import androidx.annotation.ColorInt
 import androidx.annotation.DrawableRes
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -14,6 +16,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -129,6 +132,7 @@ data class QsbState(
  * Defines the click handlers for the various interactive elements within the Quick Search Bar (QSB).
  *
  * @property onQsbClick Callback invoked when the main body of the search bar is clicked.
+ * @property onQsbLongClick Callback invoked when the main body of the search bar is long clicked.
  * @property onStartIconClick Optional callback invoked when the leading icon (e.g., search provider logo) is clicked.
  * @property onEndIconClick Callback invoked when one of the trailing icons (e.g., Mic, Lens, or Clear) is clicked,
  * passing the specific [QsbIconId] of the clicked icon.
@@ -136,6 +140,7 @@ data class QsbState(
 @Immutable
 data class QsbActions(
     val onQsbClick: () -> Unit,
+    val onQsbLongClick: (() -> Unit)? = null,
     val onStartIconClick: (() -> Unit)? = null,
     val onEndIconClick: ((id: QsbIconId) -> Unit),
     /**
@@ -396,8 +401,9 @@ fun LawnQsbUi(
         .semantics { contentDescription = state.contentDescription }
         .clip(shape)
         .background(ComposeColor(style.backgroundColor).copy(alpha = style.backgroundAlpha), shape)
-        .clickable(
+        .combinedClickable(
             onClick = actions.onQsbClick,
+            onLongClick = actions.onQsbLongClick,
             interactionSource = remember { MutableInteractionSource() },
             indication = ripple(
                 color = MaterialTheme.colorScheme.onSurface,
@@ -443,25 +449,30 @@ fun LawnQsbUi(
 
         Spacer(Modifier.weight(1f))
 
-        state.endIcons.forEachIndexed { index, icon ->
-            val isLastVisible = remember(state.endIcons, index) {
-                state.endIcons.drop(index + 1).none { it.visible }
-            }
-            AnimatedVisibility(
-                visible = icon.visible,
-                enter = fadeIn(),
-                exit = fadeOut(),
-            ) {
-                QsbIcon(
-                    icon = icon,
-                    shape = shape,
-                    onClick = { actions.onEndIconClick(icon.id) },
-                    onPressDown = actions.onEndIconPressDown?.let { down -> { down(icon.id) } },
-                    onPressUp = actions.onEndIconPressUp?.let { up -> { cancelled -> up(icon.id, cancelled) } },
-                    modifier = Modifier.addIf(isLastVisible) {
-                        offset(x = (-6).dp)
-                    },
-                )
+        val visibleIcons = state.endIcons.filter { it.visible }
+        AnimatedContent(
+            targetState = visibleIcons,
+            transitionSpec = {
+                fadeIn() togetherWith fadeOut() using SizeTransform(clip = false)
+            },
+            label = "endIcons",
+            contentAlignment = Alignment.CenterEnd,
+        ) { icons ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                icons.forEachIndexed { index, icon ->
+                    val isLast = index == icons.lastIndex
+                    QsbIcon(
+                        icon = icon,
+                        shape = shape,
+                        onClick = { actions.onEndIconClick(icon.id) },
+                        // Nexus: the mic is a raw press/release (tap vs hold), not a click.
+                        onPressDown = actions.onEndIconPressDown?.let { down -> { down(icon.id) } },
+                        onPressUp = actions.onEndIconPressUp?.let { up -> { cancelled -> up(icon.id, cancelled) } },
+                        modifier = Modifier.addIf(isLast) {
+                            offset(x = (-6).dp)
+                        },
+                    )
+                }
             }
         }
     }

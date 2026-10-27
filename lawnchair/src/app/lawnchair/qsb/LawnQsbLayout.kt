@@ -4,7 +4,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.widget.Toast
 import android.content.Intent
+import android.graphics.Rect
+import android.graphics.RectF
 import android.util.AttributeSet
+import android.view.View
 import android.widget.FrameLayout
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -14,6 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.children
 import androidx.lifecycle.lifecycleScope
+import app.lawnchair.LawnchairLauncher
 import app.lawnchair.animateToAllApps
 import app.lawnchair.launcher
 import app.lawnchair.preferences.observeAsState
@@ -31,12 +35,17 @@ import app.lawnchair.qsb.providers.Nexus
 import app.lawnchair.qsb.providers.PixelSearch
 import app.lawnchair.qsb.providers.QsbSearchProvider
 import app.lawnchair.qsb.providers.QsbSearchProviderType
+import app.lawnchair.ui.preferences.PreferenceActivity
+import app.lawnchair.ui.preferences.navigation.Search
 import app.lawnchair.ui.theme.LawnchairTheme
 import app.lawnchair.util.ProvideLifecycleState
 import app.lawnchair.util.repeatOnAttached
 import com.android.launcher3.BaseActivity
 import com.android.launcher3.DeviceProfile
+import com.android.launcher3.R
+import com.android.launcher3.logging.StatsLogManager
 import com.android.launcher3.views.ActivityContext
+import com.android.launcher3.views.OptionsPopupView
 import com.patrykmichalik.opto.core.firstBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -128,7 +137,9 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                                 } else {
                                     launcher.lifecycleScope.launch {
                                         if (prefs2.matchHotseatQsbStyle.firstCached()) {
-                                            launcher.appsView.searchUiManager.editText?.showKeyboard()
+                                            val searchUiManager = launcher.appsView.searchUiManager
+                                            searchUiManager.setDirectFocus(true)
+                                            searchUiManager.editText?.showKeyboard()
                                             launcher.animateToAllApps()
                                         } else {
                                             searchProvider.launch(launcher)
@@ -136,6 +147,7 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
                                     }
                                 }
                             },
+                            onQsbLongClick = ::openOptions,
                             onStartIconClick = null,
                             onEndIconClick = { id ->
                                 runCatching {
@@ -172,6 +184,18 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
             }
         }
 
+        // Stop Compose QSB from disappearing
+        // https://stackoverflow.com/questions/72781705/jetpack-compose-view-not-drawing-when-coming-back-to-fragment/77496737#77496737
+        composeView.addOnAttachStateChangeListener(object : OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {
+                requestLayout()
+                composeView.disposeComposition()
+            }
+            override fun onViewDetachedFromWindow(v: View) {
+                composeView.disposeComposition()
+            }
+        })
+
         addView(
             composeView,
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
@@ -189,11 +213,33 @@ class LawnQsbLayout(context: Context, attrs: AttributeSet?) : FrameLayout(contex
         }
     }
 
+    private fun openOptions() {
+        val launcher = context.launcher
+        val pos = Rect()
+        launcher.dragLayer.getDescendantRectRelativeToSelf(composeView, pos)
+        OptionsPopupView.show<LawnchairLauncher>(launcher, RectF(pos), listOf(getCustomizeOption()), true)
+    }
+
+    private fun getCustomizeOption() = OptionsPopupView.OptionItem(
+        context,
+        R.string.action_customize,
+        R.drawable.ic_setting,
+        StatsLogManager.LauncherEvent.IGNORE,
+    ) {
+        context.startActivity(PreferenceActivity.createIntent(context, Search()))
+        true
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val dp = activity.deviceProfile
         // Unlike Phone, for Foldable/Tablet we let the original onMeasure do that instead since it
         // matched what we need. It perfectly fit the QSB with the grid.
         if (!dp.deviceProperties.isPhone) {
+            if (!composeView.isAttachedToWindow) {
+                setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.getSize(heightMeasureSpec))
+                return
+            }
+
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
             return
         }

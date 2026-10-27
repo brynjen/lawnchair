@@ -55,12 +55,30 @@
     <string name="changes_dialog_commit_info">ni %1$s • %2$s • %3$s</string>
     <!-- Time ago strings -->
     <string name="time_just_now">ngayon lang</string>
-    <string name="time_minutes_ago">%dm</string>
-    <string name="time_hours_ago">%do</string>
-    <string name="time_days_ago">%da</string>
-    <string name="time_weeks_ago">%dl</string>
-    <string name="time_months_ago">%db</string>
-    <string name="time_years_ago">%dt</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%dm</item>
+        <item quantity="other">%dm</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">%do</item>
+        <item quantity="other">%do</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">%da</item>
+        <item quantity="other">%da</item>
+    </plurals>
+    <plurals name="time_weeks_ago">
+        <item quantity="one">%dl</item>
+        <item quantity="other">%dl</item>
+    </plurals>
+    <plurals name="time_months_ago">
+        <item quantity="one">%db</item>
+        <item quantity="other">%db</item>
+    </plurals>
+    <plurals name="time_years_ago">
+        <item quantity="one">%dt</item>
+        <item quantity="other">%dt</item>
+    </plurals>
     <string name="managed_by_lawnchair">Pinamamahalaan ng Lawnchair</string>
     <!-- When mentioning settings UI -->
     <string name="smartspace_preferences">Mga Kagustuhan</string>
@@ -114,6 +132,7 @@
     <string name="apps_in_folder_label">Hide folder apps</string>
     <string name="apps_in_folder_description">Apps assigned to folders are excluded from app lists</string>
     <string name="folders_filter_duplicates">Only show unique apps</string>
+    <string name="folder_manage_apps">Manage apps</string>
     <string name="my_folder_label">Aking folder</string>
     <string name="sort_active_items_action">Sort active items</string>
     <!-- A11y description -->
@@ -123,6 +142,8 @@
     <string name="x_and_y">%1$s at %2$s</string>
     <string name="advanced">Advanced</string>
     <!-- Draggable -->
+    <string name="reorderable_move_up">Move up</string>
+    <string name="reorderable_move_down">Move down</string>
     <string name="reorderable_active_items">Active items</string>
     <string name="reorderable_disabled_items">Other items</string>
     <string name="reorderable_disabled_hint">Disabled items will appear here</string>
@@ -133,6 +154,8 @@
 
     -->
     <string name="settings">Mga Settings</string>
+    <!-- Shown on large screens until a settings page is picked from the menu beside it. -->
+    <string name="settings_pick_a_page">Pick a setting from the menu</string>
     <string name="general_label">Pangkalahatan</string>
     <string name="general_description">Mga Kulay, icon pack and tuldok pang-abiso</string>
     <string name="home_screen_label">Home Screen</string>
@@ -168,7 +191,7 @@
     <string name="workspace_increase_max_grid_size_label">Increase maximum grid size limit</string>
     <string name="workspace_increase_max_grid_size_description">Increase maximum allowed home screen grid size from 10 &#xd7; 10 to 20 &#xd7; 20</string>
     <string name="always_reload_icons_label">Always reload icons</string>
-    <string name="always_reload_icons_description">Iwasang gumamit ng mga naka-cache na icon mula sa mga icon pack</string>
+    <string name="always_reload_icons_description">Avoid caching to reload icons immediately when theme or accent color changes</string>
     <string name="always_reload_icons_warning">This will cause icons to refresh regularly, impacting performance. Turn off if the icon pack doesn\'t update regularly.</string>
     <string name="show_deck_layout">Deck layout</string>
     <string name="show_deck_layout_description">Show a layout option to hide the app drawer and automatically add new apps to the home screen</string>
@@ -180,6 +203,11 @@
     <string name="gesturenavcontract_label">Use GestureNavContract API</string>
     <string name="gesturenavcontract_description">Support Android\'s enhanced animations when using gesture navigation</string>
     <string name="gesturenavcontract_warning_incompatibility">Your device isn\'t fully supported. This may cause visual issue for some animations.</string>
+    <string name="vibration_feedback_level_label">Vibration feedback level</string>
+    <string name="vibration_feedback_no_feedback_choice">Wala</string>
+    <string name="vibration_feedback_minimal_choice">Minimal</string>
+    <string name="vibration_feedback_default_choice">Pangkaraniwan</string>
+    <string name="vibration_feedback_expressive_choice">Expressive</string>
     <string name="recents_lock_unlock">App locking</string>
     <string name="recents_lock_unlock_description">Prevent the selected app from closing when you tap \"Clear all\"</string>
     <!--Overlay-->
@@ -188,6 +216,23 @@
     <string name="overlay_suck_in">Suck in</string>
     <string name="overlay_label">Overlay</string>
     <string name="overlay_none">Wala</string>
+    <!--
+    App suggestions
+    -->
+    <string name="suggestion_pref_screen_title">Mga mungkahi</string>
+    <string name="global_predictions_label">Show suggestion features</string>
+    <string name="app_predictions_label">App suggestions</string>
+    <string name="prediction_mode_label">Suggestions provider</string>
+    <string name="app_predictions_disable_reason_pre_q_description">This feature requires Android 10 or higher</string>
+    <string name="prediction_mode_system">Sistema</string>
+    <string name="prediction_mode_none">Patayin</string>
+    <string name="prediction_weighted_usage_stats_label">Use device usage data</string>
+    <string name="prediction_weighted_usage_stats_description">Use your device\'s usage statistics to make suggestions more accurate</string>
+    <string name="dismissed_prediction_apps_label">Blocked apps</string>
+    <string name="dismissed_prediction_apps_label_with_count">Blocked apps (%1$d)</string>
+    <string name="prediction_system_settings">Manage system suggestions</string>
+    <string name="missing_usage_access_label">Usage access needed</string>
+    <string name="missing_usage_access_desc">To improve app suggestions, turn on usage access for <xliff:g id="name" example="Lawnchair">%1$s</xliff:g></string>
     <!--
 
     Notifications
@@ -215,9 +260,7 @@
     <string name="twoline_label">Gamitin ang mga maramihang linya</string>
     <!-- Icon-related settings -->
     <string name="transparent_background_icons_label">Transparent icon backgrounds</string>
-    <string name="transparent_background_icons_description">For themed icons and auto-adaptive icons</string>
     <string name="auto_adaptive_icons_label">Auto-adaptive icons</string>
-    <string name="auto_adaptive_icons_description">For all non-adaptive icons</string>
     <string name="shadow_bg_icons_label">Show shadow behind icons</string>
     <string name="background_lightness_label">Background lightness</string>
     <string name="adaptive_icon_background_description">Use 100% background lightness for white</string>
@@ -282,16 +325,23 @@
     <string name="icon_shape_clipboard_import_error">Clipboard doesn\'t contain a valid icon shape</string>
     <!-- Icon pack settings -->
     <string name="icon_pack">Icon pack</string>
-    <string name="themed_icon_pack">Themed icon source</string>
-    <string name="themed_icon_pack_tint">Tint with accent color</string>
+    <string name="get_more_icon_packs">Get more icons</string>
+    <string name="fallback_icon_source_title">Fallback icon source</string>
     <string name="system_icons">System icons</string>
     <string name="force_monochrome_label">Force monochrome</string>
-    <string name="force_monochrome_description">Recolor unsupported apps with the current accent color. Requires restart.</string>
+    <string name="force_monochrome_description">Recolor unsupported apps with the current accent color.</string>
+    <string name="enforce_themed_icons_title">Enforce themed icons</string>
+    <string name="enforce_themed_icons_description">Even to unsupported apps (not recommended)</string>
     <string name="themed_icon_title">Themed icons</string>
+    <string name="themed_icons_description">Adapt supported app icons to match your device\'s theme and color scheme. These icons are applied on top of your existing icon packs.</string>
     <string name="themed_icons_off_label">Patayin</string>
     <string name="themed_icons_home_label">Home screen</string>
     <string name="themed_icons_home_and_drawer_label">Home screen and app drawer</string>
+    <string name="themed_icons_no_fallback">No fallback</string>
     <string name="lawnicons_not_installed_description">No supported icon packs</string>
+    <string name="advanced_icon_settings_title">Advanced icon settings</string>
+    <string name="reshape_unthemed_icons_title">Reshape unthemed icons</string>
+    <string name="reshape_unthemed_icons_description">By adding a background</string>
     <!-- Fonts -->
     <string name="pref_fonts_add_fonts">Add fonts</string>
     <string name="pref_fonts_add_fonts_summary">Sinusuportahan ang mga font na TTF at OTF</string>
@@ -453,8 +503,19 @@
     <string name="backup_restore_success">Backup restored</string>
     <string name="backup_restore_error">Failed to restore backup</string>
     <string name="invalid_backup_file">Invalid backup file</string>
+    <string name="restore_nova_backup">Restore Nova backup</string>
+    <string name="invalid_nova_backup_file">Invalid Nova backup file</string>
+    <string name="nova_grid_label">Grid</string>
+    <string name="nova_grid_value">%1$d x %2$d</string>
+    <string name="nova_dock_label">Dock</string>
+    <string name="nova_app_label">Apps</string>
+    <string name="nova_widget_label">Widgets</string>
+    <string name="nova_folder_label">Mga Folder</string>
+    <string name="nova_shortcut_label">Shortcuts</string>
+    <string name="nova_icon_pack_label">Icon pack</string>
     <string name="create_backup_description">Export settings and launcher layout</string>
     <string name="restore_backup_description">Import a previously created backup</string>
+    <string name="restore_nova_backup_description">Import layout from a Nova Launcher backup</string>
     <!--
 
     Gesture settings
@@ -520,6 +581,8 @@
     <string name="home_screen_rotation_description">Allow home screen rotation when the device is rotated</string>
     <string name="auto_updater_label">Automatically check for updates</string>
     <string name="auto_updater_description">Checks for Nightly updates when opening the About screen</string>
+    <string name="live_information_label">Live information</string>
+    <string name="live_information_description">Displays announcement, and set the default feature flags</string>
     <string name="wallpaper_blur">Blur wallpaper (experimental)</string>
     <string name="wallpaper_background_blur">Blur intensity</string>
     <string name="wallpaper_background_blur_factor">Factor threshold</string>
@@ -594,6 +657,7 @@
     <string name="hotseat_bg_vertical_inset_top">Top margin</string>
     <string name="hotseat_bg_vertical_inset_bottom">Bottom margin</string>
     <string name="hotseat_bg_color_label">Background color</string>
+    <string name="hotseat_bg_corner_radius">Background corner radius</string>
     <string name="hotseat_bg_alpha">Background opacity</string>
     <!-- Pause apps shortcut -->
     <string name="pause">Pause</string>
@@ -604,6 +668,8 @@
     <string name="paused_apps_drop_target_label">Pause app</string>
     <string name="open_in_store_drop_target_label">Open in store</string>
     <string name="dock_icons">Dock icons</string>
+    <string name="dock_rows">Dock rows</string>
+    <string name="dock_pages">Dock pages</string>
     <string name="state_folded">%1$s (folded)</string>
     <string name="state_unfolded">%1$s (unfolded)</string>
     <string name="folded_label">Folded</string>
@@ -696,7 +762,6 @@
     <string name="pref_search_auto_show_keyboard">Automatically show keyboard</string>
     <string name="fuzzy_search_title">Fuzzy search</string>
     <string name="fuzzy_search_desc">Approximate matching for app searches</string>
-    <string name="suggestion_pref_screen_title">Mga mungkahi</string>
     <string name="show_suggested_apps_at_drawer_top">Show suggested apps at the top of the drawer</string>
     <string name="perform_wide_search_title">Device search</string>
     <string name="perform_wide_search_description">Search your phone contacts, files, and settings</string>

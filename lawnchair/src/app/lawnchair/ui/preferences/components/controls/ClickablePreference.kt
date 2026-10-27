@@ -16,16 +16,18 @@
 
 package app.lawnchair.ui.preferences.components.controls
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ListItemColors
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.lawnchair.ui.ModalBottomSheetContent
@@ -34,6 +36,8 @@ import app.lawnchair.ui.theme.LawnchairTheme
 import app.lawnchair.ui.util.bottomSheetHandler
 import app.lawnchair.ui.util.preview.PreferenceGroupPreviewContainer
 import app.lawnchair.ui.util.preview.PreviewLawnchair
+import com.android.launcher3.util.MSDLPlayerWrapper
+import com.google.android.msdl.data.model.MSDLToken
 
 @Composable
 fun ClickablePreference(
@@ -41,31 +45,39 @@ fun ClickablePreference(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     confirmationText: String? = null,
+    colors: ListItemColors = ListItemDefaults.segmentedColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+    ),
+    hapticToken: MSDLToken? = MSDLToken.TAP_LOW_EMPHASIS,
     onClick: () -> Unit,
 ) {
     val bottomSheetHandler = bottomSheetHandler
+    val mMSDLPlayerWrapper = MSDLPlayerWrapper.INSTANCE.get(LocalContext.current)
     PreferenceTemplate(
         title = { Text(text = label) },
-        modifier = modifier
-            .clickable {
-                if (confirmationText != null) {
-                    bottomSheetHandler.show {
-                        PreferenceClickConfirmation(
-                            title = label,
-                            text = confirmationText,
-                            onDismissRequest = { bottomSheetHandler.hide() },
-                            onConfirm = onClick,
-                        )
-                    }
-                } else {
-                    onClick()
+        modifier = modifier,
+        description = subtitle?.let { { Text(text = it) } },
+        onClick = {
+            if (confirmationText != null) {
+                mMSDLPlayerWrapper.playToken(MSDLToken.TAP_MEDIUM_EMPHASIS)
+                bottomSheetHandler.show {
+                    PreferenceClickConfirmation(
+                        title = label,
+                        text = confirmationText,
+                        onDismissRequest = { bottomSheetHandler.hide() },
+                        onConfirm = onClick,
+                    )
                 }
-            },
-        description = { subtitle?.let { Text(text = it) } },
+            } else {
+                hapticToken?.let { mMSDLPlayerWrapper.playToken(it) }
+                onClick()
+            }
+        },
+        colors = colors,
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PreferenceClickConfirmation(
     title: String,
@@ -104,13 +116,11 @@ fun PreferenceClickConfirmation(
 private fun ClickablePreferencePreview() {
     LawnchairTheme {
         PreferenceGroupPreviewContainer {
-            Item {
-                ClickablePreference(
-                    label = "Label",
-                    subtitle = "Subtitle",
-                    onClick = {},
-                )
-            }
+            ClickablePreference(
+                label = "Label",
+                subtitle = "Subtitle",
+                onClick = {},
+            )
         }
     }
 }

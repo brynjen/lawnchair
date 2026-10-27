@@ -94,8 +94,8 @@ fun ContributorRow(
 ) {
     PreferenceTemplate(
         title = { Text(text = name) },
-        modifier = modifier
-            .clickable(onClick = onClick),
+        modifier = modifier,
+        onClick = onClick,
         description = {
             Text(
                 text = description,

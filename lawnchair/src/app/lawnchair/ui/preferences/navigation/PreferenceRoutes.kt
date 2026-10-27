@@ -103,6 +103,14 @@ data object ExperimentalFeatures : PreferenceRootRoute, PreferenceDeepLink {
 }
 
 @Serializable
+data object Predictions : PreferenceRoute, PreferenceDeepLink {
+    override val deepLink = "$URI/predictions"
+}
+
+@Serializable
+data object DismissedPredictionApps : PreferenceRoute
+
+@Serializable
 data object DebugMenu : PreferenceRootRoute
 
 @Serializable
@@ -115,6 +123,16 @@ data class GeneralFontSelection(val prefKey: String) : PreferenceRoute
 @Serializable
 data object GeneralIconPack : PreferenceRoute, PreferenceDeepLink {
     override val deepLink = "$URI/general-iconpack"
+}
+
+@Serializable
+data object GeneralThemedIcons : PreferenceRoute, PreferenceDeepLink {
+    override val deepLink = "$URI/general-themedicons"
+}
+
+@Serializable
+data object GeneralAdvancedIcons : PreferenceRoute, PreferenceDeepLink {
+    override val deepLink = "$URI/general-advanced-icons"
 }
 
 @Serializable

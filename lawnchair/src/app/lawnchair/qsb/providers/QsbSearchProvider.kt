@@ -136,6 +136,8 @@ sealed class QsbSearchProvider(
             Yandex,
             Fennec,
             Firefox,
+            FirefoxBeta,
+            FirefoxNightly,
             Iceraven,
             Startpage,
             StartpageEU,

@@ -15,7 +15,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -46,7 +45,6 @@ import app.lawnchair.ui.preferences.components.layout.PreferenceTemplate
 import com.android.launcher3.InvariantDeviceProfile
 import com.android.launcher3.R
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun HomeScreenGridPreferences(
     modifier: Modifier = Modifier,
@@ -152,71 +150,18 @@ fun HomeScreenGridPreferences(
                                 maxItemsInEachRow = if (isExpandedScreen) Int.MAX_VALUE else 1,
                             ) {
                                 PreferenceGroup(heading = stringResource(id = R.string.when_folded_label)) {
-                                    Item {
-                                        SliderPreference(
-                                            label = stringResource(id = R.string.columns),
-                                            adapter = columns.asPreferenceAdapter(),
-                                            step = 1,
-                                            valueRange = 3..maxGridSize,
-                                        )
-                                    }
-                                    Item {
-                                        SliderPreference(
-                                            label = stringResource(id = R.string.rows),
-                                            adapter = rows.asPreferenceAdapter(),
-                                            step = 1,
-                                            valueRange = 3..maxGridSize,
-                                        )
-                                    }
-                                    Item {
-                                        SliderPreference(
-                                            label = stringResource(id = R.string.dock_icons),
-                                            adapter = hotseatColumns.asPreferenceAdapter(),
-                                            step = 1,
-                                            valueRange = 3..maxGridSize,
-                                        )
-                                    }
-                                }
-
-                                PreferenceGroup(
-                                    heading = stringResource(id = R.string.when_unfolded_label),
-                                ) {
-                                    Item {
-                                        SliderPreference(
-                                            label = stringResource(id = R.string.dock_icons),
-                                            adapter = hotseatColumnsUnfolded.asPreferenceAdapter(),
-                                            step = 1,
-                                            valueRange = hotseatColumns.intValue..maxGridSize,
-                                        )
-                                    }
-                                    Item {
-                                        FakeExpandedGridPreference(
-                                            columns = columns.intValue * 2,
-                                            rows = rows.intValue,
-                                            description = stringResource(id = R.string.unfolded_grid_description),
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            PreferenceGroup {
-                                Item {
                                     SliderPreference(
                                         label = stringResource(id = R.string.columns),
                                         adapter = columns.asPreferenceAdapter(),
                                         step = 1,
                                         valueRange = 3..maxGridSize,
                                     )
-                                }
-                                Item {
                                     SliderPreference(
                                         label = stringResource(id = R.string.rows),
                                         adapter = rows.asPreferenceAdapter(),
                                         step = 1,
                                         valueRange = 3..maxGridSize,
                                     )
-                                }
-                                Item {
                                     SliderPreference(
                                         label = stringResource(id = R.string.dock_icons),
                                         adapter = hotseatColumns.asPreferenceAdapter(),
@@ -224,6 +169,43 @@ fun HomeScreenGridPreferences(
                                         valueRange = 3..maxGridSize,
                                     )
                                 }
+
+                                PreferenceGroup(
+                                    heading = stringResource(id = R.string.when_unfolded_label),
+                                ) {
+                                    SliderPreference(
+                                        label = stringResource(id = R.string.dock_icons),
+                                        adapter = hotseatColumnsUnfolded.asPreferenceAdapter(),
+                                        step = 1,
+                                        valueRange = hotseatColumns.intValue..maxGridSize,
+                                    )
+                                    FakeExpandedGridPreference(
+                                        columns = columns.intValue * 2,
+                                        rows = rows.intValue,
+                                        description = stringResource(id = R.string.unfolded_grid_description),
+                                    )
+                                }
+                            }
+                        } else {
+                            PreferenceGroup {
+                                SliderPreference(
+                                    label = stringResource(id = R.string.columns),
+                                    adapter = columns.asPreferenceAdapter(),
+                                    step = 1,
+                                    valueRange = 3..maxGridSize,
+                                )
+                                SliderPreference(
+                                    label = stringResource(id = R.string.rows),
+                                    adapter = rows.asPreferenceAdapter(),
+                                    step = 1,
+                                    valueRange = 3..maxGridSize,
+                                )
+                                SliderPreference(
+                                    label = stringResource(id = R.string.dock_icons),
+                                    adapter = hotseatColumns.asPreferenceAdapter(),
+                                    step = 1,
+                                    valueRange = 3..maxGridSize,
+                                )
                             }
                         }
                     }
@@ -307,7 +289,6 @@ private fun FakeExpandedGridPreference(
             Text(description)
         },
         modifier = modifier,
-        applyPaddings = false,
         enabled = false,
     )
 }

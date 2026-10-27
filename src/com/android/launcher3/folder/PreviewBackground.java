@@ -32,7 +32,6 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
@@ -45,13 +44,12 @@ import android.view.animation.Interpolator;
 
 import androidx.annotation.VisibleForTesting;
 
-import androidx.core.graphics.ColorUtils;
-
 import com.android.launcher3.CellLayout;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Flags;
 import com.android.launcher3.R;
 import com.android.launcher3.celllayout.DelegatedCellDrawing;
+import com.android.launcher3.graphics.PathWrapper;
 import com.android.launcher3.graphics.ShapeDelegate;
 import com.android.launcher3.graphics.ThemeManager;
 import com.android.launcher3.util.Themes;
@@ -87,7 +85,7 @@ public class PreviewBackground extends DelegatedCellDrawing {
     private RadialGradient mShadowShader = null;
 
     private final Matrix mShaderMatrix = new Matrix();
-    private final Path mPath = new Path();
+    private final PathWrapper mPath = new PathWrapper();
 
     private final Paint mPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
@@ -191,20 +189,11 @@ public class PreviewBackground extends DelegatedCellDrawing {
 
         PreferenceManager2 preferenceManager2 = PreferenceManager2.INSTANCE.get(context);
 
-        // Load folder color
-        ColorOption colorOption = PreferenceCacheExtensionsKt.firstCached(preferenceManager2.getFolderColor());
-        int folderColor = colorOption.getColorPreferenceEntry().getLightColor().invoke(context);
-
         TypedArray ta = context.getTheme().obtainStyledAttributes(R.styleable.FolderIconPreview);
         ColorOption dotColorOption = PreferenceCacheExtensionsKt.firstCached(preferenceManager2.getNotificationDotColor());
         mDotColor = dotColorOption.getColorPreferenceEntry().getLightColor().invoke(context);
         mStrokeColor = ColorTokens.FolderIconBorderColor.resolveColor(context);
-        if (folderColor != 0) {
-            mBgColor = folderColor;
-        } else {
-            mBgColor = ColorTokens.FolderPreviewColor.resolveColor(context);
-        }
-        mBgColor = ColorUtils.setAlphaComponent(mBgColor, LawnchairUtilsKt.getFolderPreviewAlpha(context));
+        mBgColor = LawnchairUtilsKt.resolveFolderPreviewColor(context);
         ta.recycle();
 
         DeviceProfile grid = activity.getDeviceProfile();
@@ -327,7 +316,7 @@ public class PreviewBackground extends DelegatedCellDrawing {
 
         } else {
             saveCount = canvas.save();
-            canvas.clipPath(getClipPath(), Region.Op.DIFFERENCE);
+            canvas.clipPath(getClipPath().getPath(), Region.Op.DIFFERENCE);
         }
 
         mShaderMatrix.setScale(shadowRadius, shadowRadius);
@@ -413,7 +402,7 @@ public class PreviewBackground extends DelegatedCellDrawing {
         mScale = originalScale;
     }
 
-    public Path getClipPath() {
+    public PathWrapper getClipPath() {
         mPath.reset();
         float radius = getScaledRadius();
         if (!Flags.enableLauncherIconShapes()) {

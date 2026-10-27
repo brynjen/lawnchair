@@ -343,11 +343,7 @@ public class InvariantDeviceProfile {
     }
 
     public InvariantDeviceProfile(Context context, DeviceProfileOverrides.DBGridInfo dbGridInfo) {
-        this.mPrefs = LauncherPrefs.get(context.getApplicationContext());
-        this.mThemeManager = ThemeManager.INSTANCE.get(context.getApplicationContext());
-        this.mDisplayController = DisplayController.INSTANCE.get(context.getApplicationContext());
-        String gridName = DeviceProfileOverrides.INSTANCE.get(context).getGridName(dbGridInfo);
-        initGrid(context, gridName, dbGridInfo, null);
+        this(context, dbGridInfo, null);
     }
 
     public InvariantDeviceProfile(Context context, DeviceProfileOverrides.DBGridInfo dbGridInfo,
@@ -355,6 +351,7 @@ public class InvariantDeviceProfile {
         this.mPrefs = LauncherPrefs.get(context.getApplicationContext());
         this.mThemeManager = ThemeManager.INSTANCE.get(context.getApplicationContext());
         this.mDisplayController = DisplayController.INSTANCE.get(context.getApplicationContext());
+        this.mWMProxy = WindowManagerProxy.INSTANCE.get(context.getApplicationContext());
         String gridName = DeviceProfileOverrides.INSTANCE.get(context).getGridName(dbGridInfo);
         initGrid(context, gridName, dbGridInfo, previewOverrides);
     }
@@ -446,8 +443,9 @@ public class InvariantDeviceProfile {
             DeviceProfileOverrides.PreviewOverrides previewOverrides) {
         this.closestProfile = displayOption.grid;
         
+        // LC-Note: Not only in English. Lawnchair shows the toggle in every language, and labels
+        // break at spaces or between words, which also works for other scripts.
         enableTwoLinesInAllApps = Flags.enableTwolineToggle()
-                && Utilities.isEnglishLanguage(context)
                 && mPrefs.get(ENABLE_TWOLINE_ALLAPPS_TOGGLE);
         mLocale = context.getResources().getConfiguration().locale.toString();
 
@@ -464,8 +462,10 @@ public class InvariantDeviceProfile {
         gridType = closestProfile.gridType;
         defaultLayoutId = closestProfile.defaultLayoutId;
 
-        numFolderRows = closestProfile.numFolderRows;
-        numFolderColumns = closestProfile.numFolderColumns;
+        // LC-Note: copies, because DeviceProfileOverrides writes the folder settings into these
+        // arrays and the settings take their defaults from closestProfile's (the grid option's).
+        numFolderRows = closestProfile.numFolderRows.clone();
+        numFolderColumns = closestProfile.numFolderColumns.clone();
         folderStyle = closestProfile.folderStyle;
 
         cellStyle = closestProfile.cellStyle;

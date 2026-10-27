@@ -18,7 +18,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -112,7 +111,6 @@ fun RestoreBackupScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ColumnScope.RestoreBackupOptions(
     isPortrait: Boolean,
@@ -180,24 +178,20 @@ fun ColumnScope.RestoreBackupOptions(
         modifier = modifier,
         heading = stringResource(id = R.string.what_to_restore),
     ) {
-        Item {
-            FlagSwitchPreference(
-                flags = contents,
-                setFlags = viewModel::setBackupContents,
-                mask = LawnchairBackup.INCLUDE_LAYOUT_AND_SETTINGS,
-                label = stringResource(id = R.string.backup_content_layout_and_settings),
-                enabled = backupContents.hasFlag(LawnchairBackup.INCLUDE_LAYOUT_AND_SETTINGS),
-            )
-        }
-        Item {
-            FlagSwitchPreference(
-                flags = contents,
-                setFlags = viewModel::setBackupContents,
-                mask = LawnchairBackup.INCLUDE_WALLPAPER,
-                label = stringResource(id = R.string.backup_content_wallpaper),
-                enabled = backupContents.hasFlag(LawnchairBackup.INCLUDE_WALLPAPER),
-            )
-        }
+        FlagSwitchPreference(
+            flags = contents,
+            setFlags = viewModel::setBackupContents,
+            mask = LawnchairBackup.INCLUDE_LAYOUT_AND_SETTINGS,
+            label = stringResource(id = R.string.backup_content_layout_and_settings),
+            enabled = backupContents.hasFlag(LawnchairBackup.INCLUDE_LAYOUT_AND_SETTINGS),
+        )
+        FlagSwitchPreference(
+            flags = contents,
+            setFlags = viewModel::setBackupContents,
+            mask = LawnchairBackup.INCLUDE_WALLPAPER,
+            label = stringResource(id = R.string.backup_content_wallpaper),
+            enabled = backupContents.hasFlag(LawnchairBackup.INCLUDE_WALLPAPER),
+        )
     }
     Box(
         modifier = Modifier
