@@ -577,6 +577,9 @@ licensee {
     allowUrl("https://www.zetetic.net/sqlcipher/license/")
     // The Nexus orb (no.nordli:neural-orb-android) declares MIT by SPDX id.
     allow(SpdxId.MIT)
+    // The map (maplibre_gl, behind the app's map page): the MapLibre Android SDK and its
+    // annotation, offline and gestures libraries declare BSD-2-Clause.
+    allow(SpdxId.BSD_2_Clause)
     // The embedded Nexus app (`melos app:aar`): Flutter's engine and the plugin AARs that
     // `flutter build aar` generates carry no license metadata in their POMs. Their licenses
     // (BSD-3-Clause / MIT / Apache-2.0) ship inside the Flutter app's own LicenseRegistry.
@@ -600,6 +603,8 @@ licensee {
         'no.nordli.nexus.health.sync',
         'no.nordli.nexus.module',
         'no.nordli.nexus.notes.widgets',
+        // The map page's plugin AAR (maplibre_gl): its own POM, like the other Flutter plugins'.
+        'org.maplibre.maplibregl',
         // Sign-in (serverpod_auth_idp_flutter): the email session's secure storage and web-auth
         // plugin, share_plus (opening a run's 3D model), and the Google / Apple sign-in plugins
         // that come with it. The Google and Apple buttons are not drawn (kShowSocialSignIn).
