@@ -2,12 +2,14 @@ package app.lawnchair.nexus.news
 
 /**
  * The page's sections, as the server cuts them (`feed`'s `section`): [Now] is the news and the blogs,
- * [Ai] whatever is tagged `ai` (blogs and papers), [Papers] the research papers the box reads.
+ * [Ai] whatever is tagged `ai` (blogs and papers), [Papers] the research papers the box reads, and
+ * [Saved] what this person has starred, news and papers alike.
  */
 enum class NewsSection(val wire: String, val label: String) {
     Now("now", "Now"),
     Ai("ai", "AI"),
     Papers("papers", "Papers"),
+    Saved("saved", "Saved"),
 }
 
 /** Whether [item] is in what a search for [query] means: its title, summary, key points, text, source or authors. */

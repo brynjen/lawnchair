@@ -144,6 +144,15 @@ class NewsRepositoryTest {
             refreshCalls++
             return onRefresh()
         }
+
+        /** The (id, favorite) of each star call, and what the server answers. */
+        val stars = mutableListOf<Pair<Long, Boolean>>()
+        var onFavorite: (Boolean) -> Boolean = { it }
+
+        override suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean {
+            stars += id to favorite
+            return onFavorite(favorite)
+        }
     }
 
     private fun repository(transport: NexusTransport, authKey: String = key) =
@@ -228,6 +237,60 @@ class NewsRepositoryTest {
         assertEquals(RefreshResult.Unreachable, repo.sweep(shown = feed(1, 2)))
         assertEquals(feed(1, 2), repo.saved())
     }
+
+    // region the stars
+
+    private fun starred(vararg ids: Long) = feed(*ids).let { f -> f.copy(items = f.items.map { it.copy(favorite = true) }) }
+
+    @Test
+    fun `a star is asked of the server and the saved copies follow it`() = runBlocking {
+        val cache = NewsCache(tmp.root)
+        cache.write(url, key, feed(1, 2), "now")
+        cache.write(url, key, starred(7), "saved")
+        val transport = News(onFeed = { error("not asked") })
+        val repo = repository(transport)
+
+        assertEquals(true, repo.setFavorite(feed(1).items.single(), true))
+        assertEquals(listOf(1L to true), transport.stars)
+        // The card is starred where the person saw it, and the saved copy has it, newest first.
+        assertEquals(listOf(true, false), cache.read(url, key, "now")!!.items.map { it.favorite })
+        assertEquals(listOf(1L, 7L), cache.read(url, key, "saved")!!.items.map { it.id }.sorted())
+        assertTrue(cache.read(url, key, "saved")!!.items.all { it.favorite })
+
+        assertEquals(false, repo.setFavorite(feed(1).items.single(), false))
+        assertEquals(listOf(false, false), cache.read(url, key, "now")!!.items.map { it.favorite })
+        assertEquals(listOf(7L), cache.read(url, key, "saved")!!.items.map { it.id })
+    }
+
+    @Test
+    fun `a star the server could not take leaves everything as it was`() = runBlocking {
+        val cache = NewsCache(tmp.root)
+        cache.write(url, key, feed(1), "now")
+        cache.write(url, key, starred(7), "saved")
+        for (failure in listOf<(Boolean) -> Boolean>(
+            { throw IOException("offline") },
+            { throw NexusUnauthorizedException() },
+        )) {
+            val transport = News(onFeed = { error("not asked") }).also { it.onFavorite = failure }
+            assertNull(repository(transport).setFavorite(feed(1).items.single(), true))
+        }
+        assertEquals(listOf(false), cache.read(url, key, "now")!!.items.map { it.favorite })
+        assertEquals(listOf(7L), cache.read(url, key, "saved")!!.items.map { it.id })
+    }
+
+    @Test
+    fun `the server's answer is what the saved copies keep, and no saved copy is made up`() = runBlocking {
+        val cache = NewsCache(tmp.root)
+        cache.write(url, key, feed(1), "now")
+        // The article is gone on the server: asked to star it, the answer is no.
+        val transport = News(onFeed = { error("not asked") }).also { it.onFavorite = { false } }
+
+        assertEquals(false, repository(transport).setFavorite(feed(1).items.single(), true))
+        assertEquals(listOf(false), cache.read(url, key, "now")!!.items.map { it.favorite })
+        assertNull(cache.read(url, key, "saved"))
+    }
+
+    // endregion
 
     // region what a refresh says
 

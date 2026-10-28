@@ -164,6 +164,13 @@ class NexusClient(
     override suspend fun newsRefresh(base: String, token: String): NewsFeed =
         readNews(post(base, "/news", token, JSONObject().put("method", "refresh")))
 
+    /** `POST /news {"method":"setFavorite","id":n,"favorite":b}` → whether the article is starred now (`true` / `false`). */
+    override suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean {
+        val request = JSONObject().put("method", "setFavorite").put("id", id).put("favorite", favorite)
+        return post(base, "/news", token, request).trim().toBooleanStrictOrNull()
+            ?: throw java.io.IOException("Unreadable answer to setFavorite")
+    }
+
     private fun readNews(body: String): NewsFeed =
         parseNewsFeed(body) ?: throw java.io.IOException("Unreadable news feed")
 

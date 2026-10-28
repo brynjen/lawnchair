@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -60,11 +61,15 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
@@ -73,6 +78,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lawnchair.nexus.LocalNexusColors
@@ -99,11 +105,15 @@ import app.lawnchair.nexus.news.NewsPictures
 import app.lawnchair.nexus.news.NewsRepository
 import app.lawnchair.nexus.news.agoText
 import app.lawnchair.nexus.news.newsTags
+import app.lawnchair.nexus.news.withFavorite
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -285,9 +295,22 @@ private fun NewsPanel(
         news.search(section.wire, words)?.let { found = words to it }
     }
 
+    // A star shows at once and the server is told; if it could not be reached the star goes back to
+    // how it was, so what is shown is never a star that was not kept.
+    fun showFavorite(id: Long, on: Boolean) {
+        feed = feed?.withFavorite(id, on)
+        found = found?.let { (words, hits) -> words to hits.withFavorite(id, on) }
+        selected = selected?.takeIf { it.id == id }?.copy(favorite = on) ?: selected
+    }
+    val onFavorite: (NewsItem) -> Unit = { item ->
+        val wanted = !item.favorite
+        showFavorite(item.id, wanted)
+        scope.launch { showFavorite(item.id, news.setFavorite(item, wanted) ?: !wanted) }
+    }
+
     val article = selected
     if (article != null) {
-        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss, onAsk = onAsk)
+        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss, onAsk = onAsk, onFavorite = onFavorite)
     } else {
         // The server's answer to the words as they are now, if it has come.
         val hits = found?.takeIf { (words, _) -> words == query.trim() }?.second
@@ -297,6 +320,7 @@ private fun NewsPanel(
             items = (hits ?: feed)?.items,
             serverHits = hits != null,
             onDiscuss = onDiscuss,
+            onFavorite = onFavorite,
             now = now,
             pictures = pictures,
             query = query,
@@ -385,6 +409,7 @@ private fun ListScreen(
     /** [items] are the server's answer to [query]: they are not filtered again here. */
     serverHits: Boolean,
     onDiscuss: (NewsItem) -> Unit,
+    onFavorite: (NewsItem) -> Unit,
     now: Instant,
     pictures: NewsPictures,
     query: String,
@@ -402,8 +427,9 @@ private fun ListScreen(
     val tags = remember(items) { newsTags(items.orEmpty()) }
     // A tag the latest feed no longer carries is no filter at all.
     val tag = activeTag?.takeIf { it in tags }
+    // The saved section is the starred ones: a star taken off drops the card at once.
     val filtered = items.orEmpty().filter { a ->
-        (tag == null || a.tags.contains(tag)) && (serverHits || a.matches(query))
+        (section != NewsSection.Saved || a.favorite) && (tag == null || a.tags.contains(tag)) && (serverHits || a.matches(query))
     }
 
     Column(
@@ -433,6 +459,7 @@ private fun ListScreen(
                             if (query.isBlank()) {
                                 when (section) {
                                     NewsSection.Papers -> "No papers yet.\nThe box reads them overnight."
+                                    NewsSection.Saved -> "Nothing saved yet.\nTap the star on an article or paper to keep it here."
                                     else -> "No news right now.\nThe box reads the news overnight."
                                 }
                             } else {
@@ -443,7 +470,9 @@ private fun ListScreen(
                     }
                 }
             }
-            items(filtered, key = { it.id }) { NewsCard(it, now, pictures, query, onDiscuss = { onDiscuss(it) }) { onOpen(it) } }
+            items(filtered, key = { it.id }) {
+                NewsCard(it, now, pictures, query, onDiscuss = { onDiscuss(it) }, onFavorite = { onFavorite(it) }) { onOpen(it) }
+            }
             if (canLoadMore) {
                 item(key = "more") {
                     // Composed only when the list reaches its end: that asks for the next page.
@@ -638,6 +667,7 @@ private fun NewsCard(
     pictures: NewsPictures,
     query: String,
     onDiscuss: () -> Unit,
+    onFavorite: () -> Unit,
     onClick: () -> Unit,
 ) {
     val kindColor = AccentInk
@@ -664,13 +694,18 @@ private fun NewsCard(
             )
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Text(
-                article.metaLine(now, kindColor),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = TextStyle(color = Text3, fontSize = 11.sp),
-            )
-            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    article.metaLine(now, kindColor),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(color = Text3, fontSize = 11.sp),
+                    modifier = Modifier.weight(1f),
+                )
+                // Pushed out into the card's margin so the star's edge lines up with the text above.
+                StarButton(article.favorite, onFavorite, Modifier.offset(x = 10.dp))
+            }
+            Spacer(Modifier.height(2.dp))
             Text(
                 highlight(article.title, query, kindColor),
                 maxLines = 3,
@@ -727,6 +762,63 @@ private fun NewsCard(
                 Chip("Discuss this paper", onDiscuss)
             }
         }
+    }
+}
+
+/** A five-pointed star, filled when the article is saved and an outline when it is not. */
+@Composable
+private fun StarIcon(filled: Boolean, iconSize: Dp, color: Color) {
+    Canvas(Modifier.size(iconSize)) {
+        val outer = size.minDimension / 2f
+        val inner = outer * 0.42f
+        val centre = Offset(size.width / 2f, size.height / 2f + outer * 0.06f)
+        val path = Path()
+        for (i in 0 until 10) {
+            val radius = if (i % 2 == 0) outer else inner
+            val angle = -PI / 2 + i * PI / 5
+            val point = Offset(centre.x + (radius * cos(angle)).toFloat(), centre.y + (radius * sin(angle)).toFloat())
+            if (i == 0) path.moveTo(point.x, point.y) else path.lineTo(point.x, point.y)
+        }
+        path.close()
+        if (filled) {
+            drawPath(path, color)
+            drawPath(path, color, style = Stroke(width = 1.5.dp.toPx(), join = StrokeJoin.Round))
+        } else {
+            drawPath(path, color, style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round))
+        }
+    }
+}
+
+/** The star on a card: saves the article to read again, or takes it out of the saved ones. */
+@Composable
+private fun StarButton(saved: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .size(width = 44.dp, height = 30.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .clickable(onClickLabel = if (saved) "Remove from saved" else "Save for later", role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        StarIcon(saved, 20.dp, if (saved) AccentInk else Text3)
+    }
+}
+
+/** The article view's star with its words: "Save" for one that is not kept, "Saved" for one that is. */
+@Composable
+private fun SaveButton(saved: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .clickable(onClickLabel = if (saved) "Remove from saved" else "Save for later", role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StarIcon(saved, 20.dp, if (saved) AccentInk else Text2)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (saved) "Saved" else "Save",
+            style = TextStyle(color = if (saved) AccentInk else Text2, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+        )
     }
 }
 
@@ -798,6 +890,7 @@ private fun DetailsScreen(
     onBack: () -> Unit,
     onDiscuss: (NewsItem) -> Unit,
     onAsk: (NewsItem, String) -> Unit,
+    onFavorite: (NewsItem) -> Unit,
 ) {
     val context = LocalContext.current
     val paper = article.kind == NewsKind.Paper
@@ -810,6 +903,8 @@ private fun DetailsScreen(
     ) {
         Row(Modifier.fillMaxWidth().padding(8.dp, 4.dp, 16.dp, 0.dp), verticalAlignment = Alignment.CenterVertically) {
             BackArrow(onBack)
+            Spacer(Modifier.weight(1f))
+            SaveButton(article.favorite) { onFavorite(article) }
         }
         Column(
             Modifier

@@ -271,4 +271,14 @@ class NewsFeedTest {
         assertEquals(feed, parseNewsFeed(feed.toJson()))
         assertEquals(true, parseNewsFeed(feed.toJson())!!.items.single().translated)
     }
+
+    @Test
+    fun `the star is read from the wire, survives the saved copy, and is off for a card that does not say`() {
+        val feed = parseNewsFeed(
+            """{"cards":[{"id":1,"title":"Starred","favorite":true},{"id":2,"title":"Plain","favorite":false},{"id":3,"title":"Older server"}]}""",
+        )!!
+        assertEquals(listOf(true, false, false), feed.items.map { it.favorite })
+        assertEquals(feed, parseNewsFeed(feed.toJson()))
+        assertEquals(listOf(true, false, false), parseNewsFeed(feed.toJson())!!.items.map { it.favorite })
+    }
 }

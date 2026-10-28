@@ -70,6 +70,8 @@ data class NewsItem(
     val lang: String? = null,
     /** The title, summary and points are an English translation of an article in another language. */
     val translated: Boolean = false,
+    /** This person has starred it, to come back to for further study (the `saved` section). */
+    val favorite: Boolean = false,
 )
 
 /**
@@ -77,7 +79,7 @@ data class NewsItem(
  * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags","kind",
  * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated","alsoIn":[str],
  * "authors":[str],"categories":[str],"arxivId","upvotes","codeUrl","codeStars",
- * "claims":[{"claim","evidence"}]}],"refreshedAt","nextCursor"}`. [NewsFeed.nextCursor] is where the
+ * "claims":[{"claim","evidence"}],"favorite"}],"refreshedAt","nextCursor"}`. [NewsFeed.nextCursor] is where the
  * next page starts, null on the last.
  * The same shape is what the on-device cache keeps ([toJson]), so one parser reads both.
  */
@@ -134,6 +136,7 @@ private fun parseItem(element: JsonElement): NewsItem? {
         claims = (o["claims"] as? JsonArray).orEmpty().mapNotNull { parseClaim(it) },
         lang = o.text("lang")?.trim()?.takeIf { it.isNotEmpty() },
         translated = (o["translated"] as? JsonPrimitive)?.booleanOrNull ?: false,
+        favorite = (o["favorite"] as? JsonPrimitive)?.booleanOrNull ?: false,
     )
 }
 
@@ -186,6 +189,7 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 put("codeStars", item.codeStars)
                 put("lang", item.lang)
                 put("translated", item.translated)
+                put("favorite", item.favorite)
                 putJsonArray("claims") {
                     item.claims.forEach { claim ->
                         addJsonObject {
@@ -225,6 +229,10 @@ fun agoText(publishedAt: Instant?, now: Instant): String {
         else -> "${minutes / (24 * 60)}d ago"
     }
 }
+
+/** This feed with article [id] starred or not, as the person just made it; the rest is as it was. */
+fun NewsFeed.withFavorite(id: Long, favorite: Boolean): NewsFeed =
+    copy(items = items.map { if (it.id == id) it.copy(favorite = favorite) else it })
 
 /** The filter chips: every tag the cards carry, the most common first, ties alphabetical. */
 fun newsTags(items: List<NewsItem>): List<String> =

@@ -47,6 +47,27 @@ class NewsCache(private val dir: File) {
         }
     }
 
+    /**
+     * Follows a star into this person's saved copies, so it is still there when the page opens without
+     * the network: the sections that hold [item] get its flag, and the `saved` copy (if there is one)
+     * gains the card or loses it, newest first as the server orders it.
+     */
+    fun markFavorite(serverUrl: String, authKey: String, item: NewsItem, favorite: Boolean) {
+        for (section in listOf(null, "now", "ai", "papers")) {
+            val feed = read(serverUrl, authKey, section) ?: continue
+            if (feed.items.any { it.id == item.id }) write(serverUrl, authKey, feed.withFavorite(item.id, favorite), section)
+        }
+        val saved = read(serverUrl, authKey, "saved") ?: return
+        val others = saved.items.filter { it.id != item.id }
+        val items = if (favorite) {
+            (others + item.copy(favorite = true))
+                .sortedWith(compareByDescending<NewsItem> { it.publishedAt }.thenByDescending { it.id })
+        } else {
+            others
+        }
+        write(serverUrl, authKey, saved.copy(items = items), "saved")
+    }
+
     private companion object {
         const val PREFIX = "news-"
         const val SUFFIX = ".json"
@@ -104,6 +125,16 @@ class NewsRepository(
         refreshResult(shown, fetch(section) ?: if (section == null) swept?.also { save(it, null) } else null)
     }
 
+    /**
+     * Stars or un-stars [item] on the server and answers whether it is starred now, or null when the
+     * server could not be asked (nothing changed there). The saved copies follow ([NewsCache.markFavorite]).
+     */
+    suspend fun setFavorite(item: NewsItem, favorite: Boolean): Boolean? = calls.withLock {
+        attempt(LOAD_TIMEOUT_MS) { transport.newsFavorite(serverUrl, authKey, item.id, favorite) }?.also { now ->
+            withContext(Dispatchers.IO) { cache.markFavorite(serverUrl, authKey, item, now) }
+        }
+    }
+
     private suspend fun fetch(section: String?): NewsFeed? =
         attempt(LOAD_TIMEOUT_MS) { transport.newsFeed(serverUrl, authKey, LIMIT, null, section) }?.also { save(it, section) }
 
@@ -111,7 +142,7 @@ class NewsRepository(
         withContext(Dispatchers.IO) { cache.write(serverUrl, authKey, feed, section) }
 
     /** Null on any failure or when [timeoutMs] passes: the socket has no read timeout of its own. */
-    private suspend fun attempt(timeoutMs: Long, call: suspend () -> NewsFeed): NewsFeed? =
+    private suspend fun <T : Any> attempt(timeoutMs: Long, call: suspend () -> T): T? =
         try {
             withTimeoutOrNull(timeoutMs) { call() }
         } catch (e: CancellationException) {

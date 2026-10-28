@@ -60,5 +60,7 @@ open class StubNexusTransport : NexusTransport {
 
     override suspend fun newsImage(base: String, token: String, path: String): ByteArray = unused()
 
+    override suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean = unused()
+
     private fun unused(): Nothing = error("not used by this test")
 }

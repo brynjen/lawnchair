@@ -93,7 +93,7 @@ interface NexusTransport {
 
     /**
      * The news feed (`POST /news {"method":"feed","limit":n}`), newest first as the server orders it.
-     * [section] is `now`, `ai` or `papers` (none: everything); [cursor] is a page's `nextCursor`, for
+     * [section] is `now`, `ai`, `papers` or `saved` (none: everything); [cursor] is a page's `nextCursor`, for
      * the page after it; [query] narrows it to the articles that say it, the server searching its whole
      * catalogue rather than the page the phone holds.
      */
@@ -117,6 +117,13 @@ interface NexusTransport {
      * with the session key like any upload. Throws for a path that is not this server's.
      */
     suspend fun newsImage(base: String, token: String, path: String): ByteArray
+
+    /**
+     * Stars or un-stars article [id] for this person (`POST /news {"method":"setFavorite","id":n,
+     * "favorite":b}`) and answers whether it is starred now: the same call twice changes nothing, and
+     * an article the server no longer has comes back false.
+     */
+    suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean
 }
 
 /**

@@ -247,6 +247,11 @@ class FakeNexusTransport(
         return newsFeed(base, token, 50)
     }
 
+    override suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean {
+        delay(100)
+        return favorite
+    }
+
     /** A gradient JPEG standing in for the server's picture, so a mock card has one to show. */
     override suspend fun newsImage(base: String, token: String, path: String): ByteArray {
         delay(100)

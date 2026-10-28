@@ -11,6 +11,7 @@ import app.lawnchair.nexus.news.matches
 import app.lawnchair.nexus.news.parseNewsFeed
 import app.lawnchair.nexus.news.plus
 import app.lawnchair.nexus.news.toJson
+import app.lawnchair.nexus.news.withFavorite
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -33,8 +34,18 @@ class NewsSectionTest {
 
     @Test
     fun `the sections are named for the server`() {
-        assertEquals(listOf("now", "ai", "papers"), NewsSection.entries.map { it.wire })
-        assertEquals(listOf("Now", "AI", "Papers"), NewsSection.entries.map { it.label })
+        assertEquals(listOf("now", "ai", "papers", "saved"), NewsSection.entries.map { it.wire })
+        assertEquals(listOf("Now", "AI", "Papers", "Saved"), NewsSection.entries.map { it.label })
+    }
+
+    @Test
+    fun `a star is put on one card and no other`() {
+        val feed = NewsFeed(listOf(item(1), item(2)), null, nextCursor = "c")
+        val starred = feed.withFavorite(2, true)
+        assertEquals(listOf(false, true), starred.items.map { it.favorite })
+        assertEquals("c", starred.nextCursor)
+        assertEquals(feed, starred.withFavorite(2, false))
+        assertEquals(feed, feed.withFavorite(99, true))
     }
 
     @Test
