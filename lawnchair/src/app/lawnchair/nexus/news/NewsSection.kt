@@ -1,15 +1,19 @@
 package app.lawnchair.nexus.news
 
 /**
- * The page's sections, as the server cuts them (`feed`'s `section`): [Now] is the news and the blogs,
- * [Ai] whatever is tagged `ai` (blogs and papers), [Papers] the research papers the box reads, and
- * [Saved] what this person has starred, news and papers alike.
+ * The page's filters, one row of them, as the server cuts them (`feed`'s `section`): [Now] is all the
+ * news and the blogs, [Ai] whatever is tagged `ai` (blogs and papers), [Papers] the research papers the
+ * box reads, [Norway] the Norwegian news, [Saved] what this person has starred (news and papers alike)
+ * and [Read] what they have marked read. A read article is in no list but Read, unless it is starred.
+ * What the box hides (sport, sex, gossip, ragebait) is in none.
  */
 enum class NewsSection(val wire: String, val label: String) {
-    Now("now", "Now"),
+    Now("now", "All"),
     Ai("ai", "AI"),
-    Papers("papers", "Papers"),
-    Saved("saved", "Saved"),
+    Papers("papers", "Research"),
+    Norway("norway", "Norway"),
+    Saved("saved", "Favorites"),
+    Read("read", "Read"),
 }
 
 /** Whether [item] is in what a search for [query] means: its title, summary, key points, text, source or authors. */

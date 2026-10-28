@@ -49,28 +49,44 @@ class NewsCache(private val dir: File) {
 
     /**
      * Follows a star into this person's saved copies, so it is still there when the page opens without
-     * the network: the sections that hold [item] get its flag, and the `saved` copy (if there is one)
+     * the network: the copies that hold [item] get its flag, and the Favorites copy (if there is one)
      * gains the card or loses it, newest first as the server orders it.
      */
-    fun markFavorite(serverUrl: String, authKey: String, item: NewsItem, favorite: Boolean) {
-        for (section in listOf(null, "now", "ai", "papers")) {
+    fun markFavorite(serverUrl: String, authKey: String, item: NewsItem, favorite: Boolean) =
+        follow(serverUrl, authKey, item, "saved", favorite) { it.copy(favorite = favorite) }
+
+    /** The same for a Read mark: the Read copy gains the card or loses it. */
+    fun markRead(serverUrl: String, authKey: String, item: NewsItem, read: Boolean) =
+        follow(serverUrl, authKey, item, "read", read) { it.copy(read = read) }
+
+    private fun follow(
+        serverUrl: String,
+        authKey: String,
+        item: NewsItem,
+        special: String,
+        member: Boolean,
+        change: (NewsItem) -> NewsItem,
+    ) {
+        for (section in SECTIONS) {
             val feed = read(serverUrl, authKey, section) ?: continue
-            if (feed.items.any { it.id == item.id }) write(serverUrl, authKey, feed.withFavorite(item.id, favorite), section)
+            if (feed.items.any { it.id == item.id }) write(serverUrl, authKey, feed.updated(item.id, change), section)
         }
-        val saved = read(serverUrl, authKey, "saved") ?: return
-        val others = saved.items.filter { it.id != item.id }
-        val items = if (favorite) {
-            (others + item.copy(favorite = true))
-                .sortedWith(compareByDescending<NewsItem> { it.publishedAt }.thenByDescending { it.id })
+        val copy = read(serverUrl, authKey, special) ?: return
+        val others = copy.items.filter { it.id != item.id }
+        val items = if (member) {
+            (others + change(item)).sortedWith(compareByDescending<NewsItem> { it.publishedAt }.thenByDescending { it.id })
         } else {
             others
         }
-        write(serverUrl, authKey, saved.copy(items = items), "saved")
+        write(serverUrl, authKey, copy.copy(items = items), special)
     }
 
     private companion object {
         const val PREFIX = "news-"
         const val SUFFIX = ".json"
+
+        /** Every list that can hold a card; the first is the page of everything an older launcher asked for. */
+        val SECTIONS = listOf(null, "now", "ai", "papers", "norway", "saved", "read")
     }
 }
 
@@ -132,6 +148,16 @@ class NewsRepository(
     suspend fun setFavorite(item: NewsItem, favorite: Boolean): Boolean? = calls.withLock {
         attempt(LOAD_TIMEOUT_MS) { transport.newsFavorite(serverUrl, authKey, item.id, favorite) }?.also { now ->
             withContext(Dispatchers.IO) { cache.markFavorite(serverUrl, authKey, item, now) }
+        }
+    }
+
+    /**
+     * Marks [item] read or unread on the server and answers whether it is marked now, or null when the
+     * server could not be asked. The saved copies follow ([NewsCache.markRead]).
+     */
+    suspend fun setRead(item: NewsItem, read: Boolean): Boolean? = calls.withLock {
+        attempt(LOAD_TIMEOUT_MS) { transport.newsRead(serverUrl, authKey, item.id, read) }?.also { now ->
+            withContext(Dispatchers.IO) { cache.markRead(serverUrl, authKey, item, now) }
         }
     }
 

@@ -72,6 +72,8 @@ data class NewsItem(
     val translated: Boolean = false,
     /** This person has starred it, to come back to for further study (the `saved` section). */
     val favorite: Boolean = false,
+    /** This person has marked it read: it leaves the lists (unless starred) and is found under Read. */
+    val read: Boolean = false,
 )
 
 /**
@@ -79,7 +81,7 @@ data class NewsItem(
  * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags","kind",
  * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated","alsoIn":[str],
  * "authors":[str],"categories":[str],"arxivId","upvotes","codeUrl","codeStars",
- * "claims":[{"claim","evidence"}],"favorite"}],"refreshedAt","nextCursor"}`. [NewsFeed.nextCursor] is where the
+ * "claims":[{"claim","evidence"}],"favorite","read"}],"refreshedAt","nextCursor"}`. [NewsFeed.nextCursor] is where the
  * next page starts, null on the last.
  * The same shape is what the on-device cache keeps ([toJson]), so one parser reads both.
  */
@@ -137,6 +139,7 @@ private fun parseItem(element: JsonElement): NewsItem? {
         lang = o.text("lang")?.trim()?.takeIf { it.isNotEmpty() },
         translated = (o["translated"] as? JsonPrimitive)?.booleanOrNull ?: false,
         favorite = (o["favorite"] as? JsonPrimitive)?.booleanOrNull ?: false,
+        read = (o["read"] as? JsonPrimitive)?.booleanOrNull ?: false,
     )
 }
 
@@ -190,6 +193,7 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 put("lang", item.lang)
                 put("translated", item.translated)
                 put("favorite", item.favorite)
+                put("read", item.read)
                 putJsonArray("claims") {
                     item.claims.forEach { claim ->
                         addJsonObject {
@@ -230,15 +234,24 @@ fun agoText(publishedAt: Instant?, now: Instant): String {
     }
 }
 
-/** This feed with article [id] starred or not, as the person just made it; the rest is as it was. */
-fun NewsFeed.withFavorite(id: Long, favorite: Boolean): NewsFeed =
-    copy(items = items.map { if (it.id == id) it.copy(favorite = favorite) else it })
+/** This feed with article [id] changed by [change], as the person just made it; the rest is as it was. */
+fun NewsFeed.updated(id: Long, change: (NewsItem) -> NewsItem): NewsFeed =
+    copy(items = items.map { if (it.id == id) change(it) else it })
 
-/** The filter chips: every tag the cards carry, the most common first, ties alphabetical. */
-fun newsTags(items: List<NewsItem>): List<String> =
-    items.flatMap { it.tags }
-        .groupingBy { it }
-        .eachCount()
-        .entries
-        .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
-        .map { it.key }
+/** This feed with article [id] starred or not. */
+fun NewsFeed.withFavorite(id: Long, favorite: Boolean): NewsFeed = updated(id) { it.copy(favorite = favorite) }
+
+/** This feed with article [id] marked read or not. */
+fun NewsFeed.withRead(id: Long, read: Boolean): NewsFeed = updated(id) { it.copy(read = read) }
+
+/**
+ * Whether [item] is in [section]'s list as the person has it now: the starred ones are Favorites, the
+ * read ones are Read, and every other list leaves out what was read unless it was also starred. The
+ * server cuts the lists the same way; this keeps a list right between one answer and the next (a
+ * star or a Read mark just made, a copy saved before it).
+ */
+fun NewsItem.isIn(section: NewsSection): Boolean = when (section) {
+    NewsSection.Saved -> favorite
+    NewsSection.Read -> read
+    else -> !read || favorite
+}

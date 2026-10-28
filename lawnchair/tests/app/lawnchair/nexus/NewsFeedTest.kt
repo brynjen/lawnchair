@@ -5,7 +5,6 @@ import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.news.NewsKind
 import app.lawnchair.nexus.news.agoText
-import app.lawnchair.nexus.news.newsTags
 import app.lawnchair.nexus.news.parseNewsFeed
 import app.lawnchair.nexus.news.toJson
 import java.time.Instant
@@ -214,33 +213,6 @@ class NewsFeedTest {
 
     // endregion
 
-    // region tags
-
-    private fun card(id: Long, vararg tags: String) =
-        NewsItem(id, "", "", "T$id", "", null, null, tags.toList())
-
-    @Test
-    fun `the chips are the union of the tags, most common first, ties alphabetical`() {
-        val tags = newsTags(
-            listOf(
-                card(1, "tech", "ai"),
-                card(2, "ai", "research", "science"),
-                card(3, "tech", "ai", "business"),
-                card(4, "science"),
-            ),
-        )
-        // ai x3, then science x2 and tech x2 (alphabetical), then business and research x1.
-        assertEquals(listOf("ai", "science", "tech", "business", "research"), tags)
-    }
-
-    @Test
-    fun `no cards, no chips`() {
-        assertEquals(emptyList<String>(), newsTags(emptyList()))
-        assertEquals(emptyList<String>(), newsTags(listOf(card(1))))
-    }
-
-    // endregion
-
     @Test
     fun `an article the server translated says so, and the language it was in`() {
         val feed = parseNewsFeed(
@@ -273,12 +245,13 @@ class NewsFeedTest {
     }
 
     @Test
-    fun `the star is read from the wire, survives the saved copy, and is off for a card that does not say`() {
+    fun `the star and the read mark come from the wire, survive the saved copy, and are off for a card that does not say`() {
         val feed = parseNewsFeed(
-            """{"cards":[{"id":1,"title":"Starred","favorite":true},{"id":2,"title":"Plain","favorite":false},{"id":3,"title":"Older server"}]}""",
+            """{"cards":[{"id":1,"title":"Starred","favorite":true},{"id":2,"title":"Read","read":true},{"id":3,"title":"Older server"}]}""",
         )!!
         assertEquals(listOf(true, false, false), feed.items.map { it.favorite })
+        assertEquals(listOf(false, true, false), feed.items.map { it.read })
         assertEquals(feed, parseNewsFeed(feed.toJson()))
-        assertEquals(listOf(true, false, false), parseNewsFeed(feed.toJson())!!.items.map { it.favorite })
+        assertEquals(listOf(false, true, false), parseNewsFeed(feed.toJson())!!.items.map { it.read })
     }
 }

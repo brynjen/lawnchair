@@ -153,6 +153,15 @@ class NewsRepositoryTest {
             stars += id to favorite
             return onFavorite(favorite)
         }
+
+        /** The same for the Read mark. */
+        val reads = mutableListOf<Pair<Long, Boolean>>()
+        var onRead: (Boolean) -> Boolean = { it }
+
+        override suspend fun newsRead(base: String, token: String, id: Long, read: Boolean): Boolean {
+            reads += id to read
+            return onRead(read)
+        }
     }
 
     private fun repository(transport: NexusTransport, authKey: String = key) =
@@ -288,6 +297,38 @@ class NewsRepositoryTest {
         assertEquals(false, repository(transport).setFavorite(feed(1).items.single(), true))
         assertEquals(listOf(false), cache.read(url, key, "now")!!.items.map { it.favorite })
         assertNull(cache.read(url, key, "saved"))
+    }
+
+    @Test
+    fun `a read mark is asked of the server and the saved copies follow it, the read copy gaining the card`() = runBlocking {
+        val cache = NewsCache(tmp.root)
+        cache.write(url, key, feed(1, 2), "now")
+        cache.write(url, key, starred(1), "saved")
+        cache.write(url, key, feed(7), "read")
+        val transport = News(onFeed = { error("not asked") })
+        val repo = repository(transport)
+
+        assertEquals(true, repo.setRead(feed(1).items.single(), true))
+        assertEquals(listOf(1L to true), transport.reads)
+        assertEquals(listOf(true, false), cache.read(url, key, "now")!!.items.map { it.read })
+        assertEquals(listOf(true), cache.read(url, key, "saved")!!.items.map { it.read })
+        assertEquals(listOf(1L, 7L), cache.read(url, key, "read")!!.items.map { it.id }.sorted())
+
+        assertEquals(false, repo.setRead(feed(1).items.single(), false))
+        assertEquals(listOf(false, false), cache.read(url, key, "now")!!.items.map { it.read })
+        assertEquals(listOf(7L), cache.read(url, key, "read")!!.items.map { it.id })
+    }
+
+    @Test
+    fun `a read mark the server could not take leaves everything as it was`() = runBlocking {
+        val cache = NewsCache(tmp.root)
+        cache.write(url, key, feed(1), "now")
+        cache.write(url, key, feed(7), "read")
+        val transport = News(onFeed = { error("not asked") }).also { it.onRead = { throw IOException("offline") } }
+
+        assertNull(repository(transport).setRead(feed(1).items.single(), true))
+        assertEquals(listOf(false), cache.read(url, key, "now")!!.items.map { it.read })
+        assertEquals(listOf(7L), cache.read(url, key, "read")!!.items.map { it.id })
     }
 
     // endregion

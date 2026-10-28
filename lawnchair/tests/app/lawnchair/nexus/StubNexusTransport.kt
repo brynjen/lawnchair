@@ -62,5 +62,7 @@ open class StubNexusTransport : NexusTransport {
 
     override suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean = unused()
 
+    override suspend fun newsRead(base: String, token: String, id: Long, read: Boolean): Boolean = unused()
+
     private fun unused(): Nothing = error("not used by this test")
 }

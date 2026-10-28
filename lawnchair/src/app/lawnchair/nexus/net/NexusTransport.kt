@@ -93,7 +93,7 @@ interface NexusTransport {
 
     /**
      * The news feed (`POST /news {"method":"feed","limit":n}`), newest first as the server orders it.
-     * [section] is `now`, `ai`, `papers` or `saved` (none: everything); [cursor] is a page's `nextCursor`, for
+     * [section] is `now`, `ai`, `papers`, `norway`, `saved` or `read` (none: everything); [cursor] is a page's `nextCursor`, for
      * the page after it; [query] narrows it to the articles that say it, the server searching its whole
      * catalogue rather than the page the phone holds.
      */
@@ -124,6 +124,12 @@ interface NexusTransport {
      * an article the server no longer has comes back false.
      */
     suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean
+
+    /**
+     * Marks article [id] read or unread for this person (`POST /news {"method":"setRead","id":n,
+     * "read":b}`) and answers whether it is marked now, like [newsFavorite].
+     */
+    suspend fun newsRead(base: String, token: String, id: Long, read: Boolean): Boolean
 }
 
 /**

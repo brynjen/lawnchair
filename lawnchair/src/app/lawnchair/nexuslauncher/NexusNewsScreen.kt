@@ -104,8 +104,8 @@ import app.lawnchair.nexus.news.plus
 import app.lawnchair.nexus.news.NewsPictures
 import app.lawnchair.nexus.news.NewsRepository
 import app.lawnchair.nexus.news.agoText
-import app.lawnchair.nexus.news.newsTags
-import app.lawnchair.nexus.news.withFavorite
+import app.lawnchair.nexus.news.isIn
+import app.lawnchair.nexus.news.updated
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId
@@ -235,7 +235,6 @@ private fun NewsPanel(
     onAsk: (NewsItem, String) -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    var activeTag by remember { mutableStateOf<String?>(null) }
     var section by remember { mutableStateOf(NewsSection.Now) }
     var loadingMore by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<NewsItem?>(null) }
@@ -273,12 +272,9 @@ private fun NewsPanel(
         }
     }
 
-    // Another section is another search, and has tags of its own. Closing and opening the panel is not
-    // a change of section: the chosen tag (like the words in the search box) is there when it opens again.
-    LaunchedEffect(section) {
-        found = null
-        activeTag = null
-    }
+    // Another filter is another search. Closing and opening the panel is not a change of filter: the
+    // chosen one (like the words in the search box) is there when it opens again.
+    LaunchedEffect(section) { found = null }
 
     // New words are a new list: from the top.
     LaunchedEffect(query) { listState.scrollToItem(0) }
@@ -295,22 +291,33 @@ private fun NewsPanel(
         news.search(section.wire, words)?.let { found = words to it }
     }
 
-    // A star shows at once and the server is told; if it could not be reached the star goes back to
-    // how it was, so what is shown is never a star that was not kept.
-    fun showFavorite(id: Long, on: Boolean) {
-        feed = feed?.withFavorite(id, on)
-        found = found?.let { (words, hits) -> words to hits.withFavorite(id, on) }
-        selected = selected?.takeIf { it.id == id }?.copy(favorite = on) ?: selected
+    // A star or a Read mark shows at once and the server is told; if it could not be reached the mark
+    // goes back to how it was, so what is shown is never a mark that was not kept.
+    fun show(id: Long, change: (NewsItem) -> NewsItem) {
+        feed = feed?.updated(id, change)
+        found = found?.let { (words, hits) -> words to hits.updated(id, change) }
+        selected = selected?.takeIf { it.id == id }?.let(change) ?: selected
     }
     val onFavorite: (NewsItem) -> Unit = { item ->
         val wanted = !item.favorite
-        showFavorite(item.id, wanted)
-        scope.launch { showFavorite(item.id, news.setFavorite(item, wanted) ?: !wanted) }
+        show(item.id) { it.copy(favorite = wanted) }
+        scope.launch {
+            val now = news.setFavorite(item, wanted) ?: !wanted
+            show(item.id) { it.copy(favorite = now) }
+        }
+    }
+    val onRead: (NewsItem) -> Unit = { item ->
+        val wanted = !item.read
+        show(item.id) { it.copy(read = wanted) }
+        scope.launch {
+            val now = news.setRead(item, wanted) ?: !wanted
+            show(item.id) { it.copy(read = now) }
+        }
     }
 
     val article = selected
     if (article != null) {
-        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss, onAsk = onAsk, onFavorite = onFavorite)
+        DetailsScreen(article, now, pictures, onBack = { selected = null }, onDiscuss = onDiscuss, onAsk = onAsk, onFavorite = onFavorite, onRead = onRead)
     } else {
         // The server's answer to the words as they are now, if it has come.
         val hits = found?.takeIf { (words, _) -> words == query.trim() }?.second
@@ -325,8 +332,6 @@ private fun NewsPanel(
             pictures = pictures,
             query = query,
             onQuery = { query = it },
-            activeTag = activeTag,
-            onTag = { activeTag = it },
             section = section,
             onSection = { section = it },
             canLoadMore = (hits ?: feed)?.nextCursor != null,
@@ -414,8 +419,6 @@ private fun ListScreen(
     pictures: NewsPictures,
     query: String,
     onQuery: (String) -> Unit,
-    activeTag: String?,
-    onTag: (String?) -> Unit,
     section: NewsSection,
     onSection: (NewsSection) -> Unit,
     canLoadMore: Boolean,
@@ -424,13 +427,8 @@ private fun ListScreen(
     onOpen: (NewsItem) -> Unit,
     onClose: () -> Unit,
 ) {
-    val tags = remember(items) { newsTags(items.orEmpty()) }
-    // A tag the latest feed no longer carries is no filter at all.
-    val tag = activeTag?.takeIf { it in tags }
-    // The saved section is the starred ones: a star taken off drops the card at once.
-    val filtered = items.orEmpty().filter { a ->
-        (section != NewsSection.Saved || a.favorite) && (tag == null || a.tags.contains(tag)) && (serverHits || a.matches(query))
-    }
+    // Each filter shows its own cards: a star or a Read mark just made moves a card at once.
+    val filtered = items.orEmpty().filter { a -> a.isIn(section) && (serverHits || a.matches(query)) }
 
     Column(
         Modifier
@@ -442,9 +440,7 @@ private fun ListScreen(
         Header(items == null, online)
         SearchField(query, onQuery)
         Spacer(Modifier.height(12.dp))
-        SectionRow(section, onSection)
-        Spacer(Modifier.height(10.dp))
-        TagRow(tags, tag, onTag)
+        FilterRow(section, onSection)
         Spacer(Modifier.height(8.dp))
         LazyColumn(
             state = listState,
@@ -458,8 +454,10 @@ private fun ListScreen(
                         Text(
                             if (query.isBlank()) {
                                 when (section) {
-                                    NewsSection.Papers -> "No papers yet.\nThe box reads them overnight."
-                                    NewsSection.Saved -> "Nothing saved yet.\nTap the star on an article or paper to keep it here."
+                                    NewsSection.Papers -> "No research yet.\nThe box reads papers overnight."
+                                    NewsSection.Norway -> "No Norwegian news right now.\nThe box reads the news overnight."
+                                    NewsSection.Saved -> "No favorites yet.\nTap the star on an article or paper to keep it here."
+                                    NewsSection.Read -> "Nothing read yet.\nMark an article read and it moves here."
                                     else -> "No news right now.\nThe box reads the news overnight."
                                 }
                             } else {
@@ -566,57 +564,21 @@ private fun SearchField(value: String, onValueChange: (String) -> Unit) {
     }
 }
 
-/** The sections as three tabs: the chosen one in ink with an underline, the others quiet. */
+/** The filters as one row of pills, the chosen one filled; it scrolls sideways on a narrow screen. */
 @Composable
-private fun SectionRow(section: NewsSection, onSelect: (NewsSection) -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-        NewsSection.entries.forEach { entry ->
-            val selected = entry == section
-            Column(
-                Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { onSelect(entry) },
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    entry.label,
-                    style = TextStyle(
-                        color = if (selected) TextC else Text3,
-                        fontSize = 16.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                    ),
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
-                Box(
-                    Modifier
-                        .height(2.dp)
-                        .width(24.dp)
-                        .clip(RoundedCornerShape(99.dp))
-                        .background(if (selected) Accent else Color.Transparent),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TagRow(tags: List<String>, activeTag: String?, onSelect: (String?) -> Unit) {
+private fun FilterRow(section: NewsSection, onSelect: (NewsSection) -> Unit) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        item { TagPill("All", activeTag == null) { onSelect(null) } }
-        items(tags, key = { it }) { tag ->
-            TagPill(tag.replaceFirstChar { it.uppercase() }, activeTag == tag) {
-                onSelect(if (activeTag == tag) null else tag)
-            }
+        items(NewsSection.entries, key = { it.wire }) { entry ->
+            FilterPill(entry.label, entry == section) { onSelect(entry) }
         }
     }
 }
 
 @Composable
-private fun TagPill(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun FilterPill(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .clip(RoundedCornerShape(99.dp))
@@ -822,6 +784,45 @@ private fun SaveButton(saved: Boolean, onClick: () -> Unit) {
     }
 }
 
+/** A circle with a check in it, filled when the article is read. */
+@Composable
+private fun CheckIcon(done: Boolean, iconSize: Dp, color: Color, tick: Color) {
+    Canvas(Modifier.size(iconSize)) {
+        val centre = Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension / 2f - 1.dp.toPx()
+        if (done) {
+            drawCircle(color, radius, centre)
+        } else {
+            drawCircle(color, radius, centre, style = Stroke(width = 1.6.dp.toPx()))
+        }
+        val path = Path().apply {
+            moveTo(size.width * 0.30f, size.height * 0.52f)
+            lineTo(size.width * 0.44f, size.height * 0.66f)
+            lineTo(size.width * 0.70f, size.height * 0.36f)
+        }
+        drawPath(path, if (done) tick else color, style = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+    }
+}
+
+/** The article view's Read mark: "Mark read" hides the article from the lists, "Read" takes it back. */
+@Composable
+private fun ReadButton(read: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(99.dp))
+            .clickable(onClickLabel = if (read) "Mark as unread" else "Mark as read", role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CheckIcon(read, 20.dp, if (read) AccentInk else Text2, OnAccent)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (read) "Read" else "Mark read",
+            style = TextStyle(color = if (read) AccentInk else Text2, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+        )
+    }
+}
+
 /** A small tappable pill: the Discuss button on a paper card, and a question under the article's. */
 @Composable
 private fun Chip(label: String, onClick: () -> Unit) {
@@ -891,6 +892,7 @@ private fun DetailsScreen(
     onDiscuss: (NewsItem) -> Unit,
     onAsk: (NewsItem, String) -> Unit,
     onFavorite: (NewsItem) -> Unit,
+    onRead: (NewsItem) -> Unit,
 ) {
     val context = LocalContext.current
     val paper = article.kind == NewsKind.Paper
@@ -904,6 +906,7 @@ private fun DetailsScreen(
         Row(Modifier.fillMaxWidth().padding(8.dp, 4.dp, 16.dp, 0.dp), verticalAlignment = Alignment.CenterVertically) {
             BackArrow(onBack)
             Spacer(Modifier.weight(1f))
+            ReadButton(article.read) { onRead(article) }
             SaveButton(article.favorite) { onFavorite(article) }
         }
         Column(

@@ -11,7 +11,9 @@ import app.lawnchair.nexus.news.matches
 import app.lawnchair.nexus.news.parseNewsFeed
 import app.lawnchair.nexus.news.plus
 import app.lawnchair.nexus.news.toJson
+import app.lawnchair.nexus.news.isIn
 import app.lawnchair.nexus.news.withFavorite
+import app.lawnchair.nexus.news.withRead
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,8 +36,21 @@ class NewsSectionTest {
 
     @Test
     fun `the sections are named for the server`() {
-        assertEquals(listOf("now", "ai", "papers", "saved"), NewsSection.entries.map { it.wire })
-        assertEquals(listOf("Now", "AI", "Papers", "Saved"), NewsSection.entries.map { it.label })
+        assertEquals(listOf("now", "ai", "papers", "norway", "saved", "read"), NewsSection.entries.map { it.wire })
+        assertEquals(listOf("All", "AI", "Research", "Norway", "Favorites", "Read"), NewsSection.entries.map { it.label })
+    }
+
+    @Test
+    fun `a read article is in no list but Read, unless it is starred, and Favorites are the starred ones`() {
+        val plain = item(1)
+        val read = item(2).copy(read = true)
+        val keptAfterReading = item(3).copy(read = true, favorite = true)
+        val starred = item(4).copy(favorite = true)
+        for (section in listOf(NewsSection.Now, NewsSection.Ai, NewsSection.Papers, NewsSection.Norway)) {
+            assertEquals(listOf(1L, 3L, 4L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(section) }.map { it.id })
+        }
+        assertEquals(listOf(3L, 4L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(NewsSection.Saved) }.map { it.id })
+        assertEquals(listOf(2L, 3L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(NewsSection.Read) }.map { it.id })
     }
 
     @Test
@@ -46,6 +61,9 @@ class NewsSectionTest {
         assertEquals("c", starred.nextCursor)
         assertEquals(feed, starred.withFavorite(2, false))
         assertEquals(feed, feed.withFavorite(99, true))
+        val read = feed.withRead(1, true)
+        assertEquals(listOf(true, false), read.items.map { it.read })
+        assertEquals(feed, read.withRead(1, false))
     }
 
     @Test
