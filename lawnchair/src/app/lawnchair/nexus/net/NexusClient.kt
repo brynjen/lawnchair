@@ -1,7 +1,7 @@
 package app.lawnchair.nexus.net
 
 import app.lawnchair.nexus.box.SubstrateFrame
-import app.lawnchair.nexus.box.parseSubstrateFrame
+import app.lawnchair.nexus.box.parseSubstrateLanes
 import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.parseNewsFeed
 import app.lawnchair.nexus.news.resolveNewsImageUrl
@@ -451,16 +451,17 @@ class NexusClient(
     // region streaming — substrate
 
     /**
-     * Opens `substrate.watch`: the box's slot table, a whole snapshot per frame (the server coalesces
-     * to 10 a second and repeats the snapshot every 20 s). Only the newest frame matters, so a slow
-     * collector gets the latest ([conflate]) rather than a backlog. A frame that does not parse is
-     * dropped; the flow completes when the stream ends and fails when the socket does.
+     * Opens `substrate.lanes`: the box's eight lanes as the orb draws them, one digit each, a whole
+     * snapshot per packet (the server sends one only when a lane changes, at most 10 a second, and
+     * repeats it every 20 s). Only the newest matters, so a slow collector gets the latest
+     * ([conflate]) rather than a backlog. A packet that does not parse is dropped; the flow completes
+     * when the stream ends and fails when the socket does.
      */
     override fun watchBox(base: String, token: String): Flow<SubstrateFrame> =
-        openMethodStream(base, token, ENDPOINT_SUBSTRATE, METHOD_WATCH)
+        openMethodStream(base, token, ENDPOINT_SUBSTRATE, METHOD_LANES)
             .conflate()
             .transformWhile { ev ->
-                if (ev is MethodStreamEvent.Message) parseSubstrateFrame(ev.data.toString())?.let { emit(it) }
+                if (ev is MethodStreamEvent.Message) parseSubstrateLanes(ev.data.toString())?.let { emit(it) }
                 ev is MethodStreamEvent.Message
             }
 
@@ -614,7 +615,7 @@ class NexusClient(
         private const val ENDPOINT_SUBSTRATE = "substrate"
         private const val METHOD_STREAM_TURN = "streamTurn"
         private const val METHOD_SEND_AUDIO_CHUNK = "sendAudioChunk"
-        private const val METHOD_WATCH = "watch"
+        private const val METHOD_LANES = "lanes"
         private val JSON_MEDIA = "application/json".toMediaType()
 
         /** Build an `omsc` (open method-stream command) frame. [args] is a JSON-encoded STRING. */

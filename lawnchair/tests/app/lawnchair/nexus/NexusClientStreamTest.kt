@@ -127,10 +127,10 @@ class NexusClientStreamTest {
     private fun cmsc(cid: String) = """{"type":"cmsc","data":{"cid":"$cid"}}"""
     private fun cidOf(omsc: JSONObject) = omsc.getJSONObject("data").getString("cid")
 
-    private val frameJson = """{"sequence":5,"capacity":8,"dropped":1,"slots":[{"slot":0,"mode":"paused","service":"none"}]}"""
+    private val lanesJson = """{"lanes":"2z000000","dropped":1}"""
 
     @Test
-    fun `watchBox makes the substrate call, answers pings and reads frames until the server ends the stream`() {
+    fun `watchBox makes the lanes call, answers pings and reads packets until the server ends the stream`() {
         val calls = LinkedBlockingQueue<JSONObject>()
         val pong = LinkedBlockingQueue<String>()
         val base = serve { conn ->
@@ -139,28 +139,34 @@ class NexusClientStreamTest {
             conn.send(omsr())
             conn.send("""{"type":"ping","data":{}}""")
             pong.add(conn.read()!!)
-            // Spaced out, because the stream keeps only the newest frame when the collector is behind.
-            conn.send(msm(cid, frameJson))
+            // Spaced out, because the stream keeps only the newest packet when the collector is behind.
+            conn.send(msm(cid, lanesJson))
             Thread.sleep(200)
-            conn.send(msm(cid, """{"nothing":"like a frame"}""")) // dropped, not fatal
+            conn.send(msm(cid, """{"nothing":"like a packet"}""")) // dropped, not fatal
             Thread.sleep(200)
-            conn.send(msm(cid, frameJson.replace("\"sequence\":5", "\"sequence\":6")))
+            conn.send(msm(cid, lanesJson.replace("2z", "23")))
             Thread.sleep(200)
             conn.send(cmsc(cid))
         }
 
         val frames = runBlocking { withTimeout(10_000) { NexusClient().watchBox(base, "session-key").toList() } }
 
-        assertEquals(listOf(5L, 6L), frames.map { it.sequence })
-        assertEquals(5L, frames[0].sequence)
+        assertEquals(
+            listOf(
+                listOf(SubstrateMode.Thinking, SubstrateMode.Unknown),
+                listOf(SubstrateMode.Thinking, SubstrateMode.Processing),
+            ),
+            frames.map { f -> f.slots.map { it.mode } },
+        )
+        assertEquals(listOf(0, 1), frames[0].slots.map { it.slot })
+        assertEquals(8, frames[0].capacity)
         assertEquals(1, frames[0].dropped)
-        assertEquals(SubstrateMode.Unknown, frames[0].slots.single().mode)
 
         val call = calls.poll(5, TimeUnit.SECONDS)!!
         assertEquals("omsc", call.getString("type"))
         val data = call.getJSONObject("data")
         assertEquals("substrate", data.getString("en"))
-        assertEquals("watch", data.getString("m"))
+        assertEquals("lanes", data.getString("m"))
         assertEquals("{}", data.getString("args")) // a JSON-encoded string, not an object
         assertEquals("Bearer session-key", data.getString("auth"))
         assertEquals("pong", JSONObject(pong.poll(5, TimeUnit.SECONDS)!!).getString("type"))
@@ -259,7 +265,7 @@ class NexusClientStreamTest {
         val base = serve { conn ->
             val cid = cidOf(JSONObject(conn.read()!!))
             conn.send(omsr())
-            conn.send(msm(cid, frameJson))
+            conn.send(msm(cid, lanesJson))
             closing.add(conn.read() ?: "closed")
         }
         runBlocking { withTimeout(10_000) { NexusClient().watchBox(base, "k").first() } }

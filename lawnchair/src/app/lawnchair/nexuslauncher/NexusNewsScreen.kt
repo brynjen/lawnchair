@@ -55,6 +55,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
@@ -86,6 +87,8 @@ import app.lawnchair.nexus.NexusColors
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.NexusLock
 import app.lawnchair.nexus.NexusLockNudge
+import app.lawnchair.nexus.box.BoxOrbState
+import app.lawnchair.nexus.box.boxOrbStates
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.networkUp
 import app.lawnchair.nexus.news.NewsCache
@@ -251,6 +254,16 @@ private fun NewsPanel(
     val context = LocalContext.current
     val online = rememberOnline(open)
     val transport = remember { NexusClient() }
+    // What the whole box is doing, for the orb above the feed: the substrate's lanes, one stream. Open
+    // only while the panel is, like the feed; closed, no socket is held. Passed down as State, not a
+    // value, so a lane changing recomposes the orb and not the feed.
+    val box = produceState(BoxOrbState.UNKNOWN, open, serverUrl, authKey) {
+        if (!open) {
+            value = BoxOrbState.UNKNOWN
+            return@produceState
+        }
+        boxOrbStates { transport.watchBox(serverUrl, authKey) }.collect { value = it }
+    }
     val news = remember {
         NewsRepository(transport, NewsCache(File(context.cacheDir, "nexus-news")), serverUrl, authKey)
     }
@@ -323,6 +336,7 @@ private fun NewsPanel(
         val hits = found?.takeIf { (words, _) -> words == query.trim() }?.second
         ListScreen(
             online = online,
+            box = box,
             listState = listState,
             items = (hits ?: feed)?.items,
             serverHits = hits != null,
@@ -409,6 +423,7 @@ private fun LockedScreen(lock: NexusLock, onClose: () -> Unit) {
 @Composable
 private fun ListScreen(
     online: Boolean,
+    box: State<BoxOrbState>,
     listState: LazyListState,
     items: List<NewsItem>?,
     /** [items] are the server's answer to [query]: they are not filtered again here. */
@@ -437,7 +452,7 @@ private fun ListScreen(
             .swipeToDismiss(toRight = false, onDismiss = onClose),
     ) {
         // The orb loads for the very first look, when there is nothing else to show.
-        Header(items == null, online)
+        Header(items == null, online, box)
         SearchField(query, onQuery)
         Spacer(Modifier.height(12.dp))
         FilterRow(section, onSection)
@@ -503,7 +518,7 @@ private fun rememberOnline(active: Boolean): Boolean {
 }
 
 @Composable
-private fun Header(loading: Boolean, online: Boolean) {
+private fun Header(loading: Boolean, online: Boolean, box: State<BoxOrbState>) {
     // The connection dot: teal while the phone has a network, red when it has none. The panel only
     // shows for a signed-in person, so that is the whole state until the server can say, in a
     // notification, that it is down (it will turn the dot red then); the dot does not ask the server.
@@ -528,15 +543,28 @@ private fun Header(loading: Boolean, online: Boolean) {
         // field. Its ink follows the page's mode, not the system's: they differ when the person
         // chose a theme in the app, and light ink on a light page is a faint speck.
         Box(Modifier.fillMaxWidth().height(HEADER_ORB_SLOT), contentAlignment = Alignment.Center) {
-            NeuralOrb(
-                modifier = Modifier.requiredSize(HEADER_ORB),
-                loading = loading,
-                dark = LocalNexusColors.current.isDark,
-                glowIntensity = HEADER_ORB_GLOW,
-                prominent = true,
-            )
+            HeaderOrb(loading, box)
         }
     }
+}
+
+/**
+ * The orb above the feed: the whole box, every lane the substrate reports in its own colour, so
+ * work this phone did not start (an eval of five trials, a sub-agent) shows here. While the box is at
+ * rest, or before the first packet, it draws the page's own state alone: loading for the very first
+ * look, idle after. The box is read here, not in [Header], so its packets recompose only the orb.
+ */
+@Composable
+private fun HeaderOrb(loading: Boolean, box: State<BoxOrbState>) {
+    val lanes = box.value
+    NeuralOrb(
+        modifier = Modifier.requiredSize(HEADER_ORB),
+        state = if (loading) OrbState.Loading else OrbState.Idle,
+        dark = LocalNexusColors.current.isDark,
+        glowIntensity = HEADER_ORB_GLOW,
+        prominent = true,
+        box = lanes.takeIf { it.isKnown && it.slots.isNotEmpty() },
+    )
 }
 
 @Composable

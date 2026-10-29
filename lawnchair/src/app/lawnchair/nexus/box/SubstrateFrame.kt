@@ -39,6 +39,15 @@ enum class SubstrateMode(val wire: String, val priority: Int) {
     companion object {
         fun fromWire(name: String?): SubstrateMode =
             entries.firstOrNull { it != Unknown && it.wire == name } ?: Unknown
+
+        /**
+         * The mode a lanes packet's digit names: its place in the server's `SubstrateMode`, as one
+         * base-36 digit (`0` idle, `1` listening ... `9` unauthorized; the server goes on from `a`).
+         * The order of the entries above is that wire order. A digit this build has no mode for is
+         * [Unknown], busy without a claim about what, never [Idle].
+         */
+        fun fromLane(digit: Char): SubstrateMode =
+            digit.digitToIntOrNull(36)?.let { n -> entries.filter { it != Unknown }.getOrNull(n) } ?: Unknown
     }
 }
 
@@ -98,6 +107,29 @@ fun parseSubstrateFrame(text: String): SubstrateFrame? {
         slots = slots,
         capacity = frame.primitive("capacity")?.intOrNull ?: slots.size,
         dropped = frame.primitive("dropped")?.intOrNull ?: 0,
+    )
+}
+
+/**
+ * Reads a lanes packet (`SubstrateEndpoint.lanes`; the `data.o.data` of an `msm` message) into the
+ * frame the rest of the launcher draws from: `{"lanes":"23500000","dropped":0}`, one digit per lane,
+ * lane 0 first. An idle lane is no slot, and an idle box has none, which is what the orb draws as
+ * resting. A lane carries no service, label or actor: the packet is what the orb paints and no more.
+ * Null when [text] is not an object with a `lanes` string, so one bad packet is dropped rather than
+ * ending the stream.
+ */
+fun parseSubstrateLanes(text: String): SubstrateFrame? {
+    val packet = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
+    val lanes = packet.primitive("lanes")?.takeIf { it.isString }?.content ?: return null
+    return SubstrateFrame(
+        sequence = 0L,
+        slots = lanes.mapIndexedNotNull { lane, digit ->
+            SubstrateMode.fromLane(digit).takeIf { it != SubstrateMode.Idle }?.let {
+                SubstrateSlot(lane, it, SubstrateService.None, label = null, actor = null)
+            }
+        },
+        capacity = lanes.length,
+        dropped = packet.primitive("dropped")?.intOrNull ?: 0,
     )
 }
 

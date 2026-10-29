@@ -2,10 +2,13 @@ package app.lawnchair.nexus
 
 import app.lawnchair.nexus.box.SubstrateMode
 import app.lawnchair.nexus.box.SubstrateService
+import app.lawnchair.nexus.box.BoxOrbState
 import app.lawnchair.nexus.box.parseSubstrateFrame
+import app.lawnchair.nexus.box.parseSubstrateLanes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -110,5 +113,84 @@ class SubstrateFrameTest {
         assertNull(parseSubstrateFrame("[]"))
         assertNull(parseSubstrateFrame("""{"capacity":8}"""))
         assertNull(parseSubstrateFrame("""{"slots":"idle"}"""))
+    }
+    @Test
+    fun `a lanes packet is one digit per lane, an idle lane is no slot`() {
+        val frame = parseSubstrateLanes("""{"lanes":"23526000","dropped":2}""")!!
+        assertEquals(8, frame.capacity)
+        assertEquals(2, frame.dropped)
+        assertEquals(
+            listOf(
+                SubstrateMode.Thinking,
+                SubstrateMode.Processing,
+                SubstrateMode.ToolCall,
+                SubstrateMode.Thinking,
+                SubstrateMode.Loading,
+            ),
+            frame.slots.map { it.mode },
+        )
+        assertEquals(listOf(0, 1, 2, 3, 4), frame.slots.map { it.slot })
+    }
+
+    @Test
+    fun `a lane keeps its place when the lanes before it are quiet`() {
+        val frame = parseSubstrateLanes("""{"lanes":"00020005","dropped":0}""")!!
+        assertEquals(listOf(3, 7), frame.slots.map { it.slot })
+        assertEquals(listOf(SubstrateMode.Thinking, SubstrateMode.ToolCall), frame.slots.map { it.mode })
+    }
+
+    @Test
+    fun `a resting box has no slots but is known`() {
+        val box = BoxOrbState.from(parseSubstrateLanes("""{"lanes":"00000000","dropped":0}""")!!)
+        assertTrue(box.slots.isEmpty())
+        assertTrue(box.isKnown)
+        assertEquals(0, box.busy)
+        assertEquals(SubstrateMode.Idle, box.mode)
+    }
+
+    @Test
+    fun `an offline box is lane 0 offline, not busy`() {
+        val box = BoxOrbState.from(parseSubstrateLanes("""{"lanes":"70000000","dropped":0}""")!!)
+        assertEquals(SubstrateMode.Offline, box.mode)
+        assertTrue(box.offline)
+        assertEquals(0, box.busy)
+    }
+
+    @Test
+    fun `a door shut in any lane outranks the rest`() {
+        val box = BoxOrbState.from(parseSubstrateLanes("""{"lanes":"18900000","dropped":0}""")!!)
+        assertTrue(box.unauthorized)
+        assertTrue(box.trouble)
+        assertEquals(3, box.busy)
+    }
+
+    @Test
+    fun `the lane digits are the positions the server pins`() {
+        // The server's substrate_lanes_test pins these same positions: idle 0 ... unauthorized 9.
+        val modes = "0123456789".map { SubstrateMode.fromLane(it) }
+        assertEquals(
+            listOf(
+                SubstrateMode.Idle, SubstrateMode.Listening, SubstrateMode.Thinking, SubstrateMode.Processing,
+                SubstrateMode.Speaking, SubstrateMode.ToolCall, SubstrateMode.Loading, SubstrateMode.Offline,
+                SubstrateMode.Error, SubstrateMode.Unauthorized,
+            ),
+            modes,
+        )
+    }
+
+    @Test
+    fun `a digit this build has no mode for is busy, never idle`() {
+        assertEquals(SubstrateMode.Unknown, SubstrateMode.fromLane('a'))
+        assertEquals(SubstrateMode.Unknown, SubstrateMode.fromLane('z'))
+        assertEquals(SubstrateMode.Unknown, SubstrateMode.fromLane('-'))
+        val frame = parseSubstrateLanes("""{"lanes":"a0000000","dropped":0}""")!!
+        assertEquals(SubstrateMode.Unknown, frame.slots.single().mode)
+    }
+
+    @Test
+    fun `a packet that is not lanes is dropped`() {
+        assertNull(parseSubstrateLanes("""{"nothing":"like a packet"}"""))
+        assertNull(parseSubstrateLanes("not json"))
+        assertNull(parseSubstrateLanes("""{"lanes":7}"""))
     }
 }
