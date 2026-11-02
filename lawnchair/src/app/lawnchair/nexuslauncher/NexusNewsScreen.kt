@@ -732,6 +732,7 @@ private fun NewsCard(
                     modifier = Modifier.weight(1f),
                 )
                 // Pushed out into the card's margin so the star's edge lines up with the text above.
+                ShareButton(article, Modifier.offset(x = 10.dp))
                 StarButton(article.favorite, onFavorite, Modifier.offset(x = 10.dp))
             }
             Spacer(Modifier.height(2.dp))
@@ -972,6 +973,42 @@ private fun StarButton(saved: Boolean, onClick: () -> Unit, modifier: Modifier =
         contentAlignment = Alignment.Center,
     ) {
         StarIcon(saved, 20.dp, if (saved) AccentInk else Text3)
+    }
+}
+
+/** Three dots joined by two lines, the share mark. */
+@Composable
+private fun ShareIcon(iconSize: Dp, color: Color) {
+    Canvas(Modifier.size(iconSize)) {
+        val r = size.minDimension * 0.13f
+        val top = Offset(size.width * 0.74f, size.height * 0.2f)
+        val middle = Offset(size.width * 0.26f, size.height * 0.5f)
+        val bottom = Offset(size.width * 0.74f, size.height * 0.8f)
+        val stroke = 1.6.dp.toPx()
+        drawLine(color, middle, top, stroke)
+        drawLine(color, middle, bottom, stroke)
+        for (dot in listOf(top, middle, bottom)) drawCircle(color, r, dot)
+    }
+}
+
+/** The share on a card: the phone's share sheet with the headline and the article's address. */
+@Composable
+private fun ShareButton(article: NewsItem, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    Box(
+        modifier
+            .size(width = 40.dp, height = 30.dp)
+            .clip(RoundedCornerShape(99.dp))
+            .clickable(onClickLabel = "Share", role = Role.Button) {
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_SUBJECT, article.title)
+                    .putExtra(Intent.EXTRA_TEXT, "${article.title}\n${article.url}")
+                context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        ShareIcon(18.dp, Text3)
     }
 }
 

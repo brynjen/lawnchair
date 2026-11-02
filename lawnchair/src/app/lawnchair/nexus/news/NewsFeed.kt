@@ -72,7 +72,7 @@ data class NewsItem(
     val translated: Boolean = false,
     /** This person has starred it, to come back to for further study (the `saved` section). */
     val favorite: Boolean = false,
-    /** This person has marked it read: it leaves the lists (unless starred) and is found under Read. */
+    /** This person has marked it read: it leaves the lists (starred or not) and is found under Read. */
     val read: Boolean = false,
     /** In the morning's edition (All), its group: `norway`, `world` or `research`; null in any other list. */
     val editionGroup: String? = null,
@@ -261,12 +261,12 @@ fun NewsFeed.withRead(id: Long, read: Boolean): NewsFeed = updated(id) { it.copy
 
 /**
  * Whether [item] is in [section]'s list as the person has it now: the starred ones are Favorites, the
- * read ones are Read, and every other list leaves out what was read unless it was also starred. The
+ * read ones are Read, and every other list leaves out what was read, starred or not. The
  * server cuts the lists the same way; this keeps a list right between one answer and the next (a
  * star or a Read mark just made, a copy saved before it).
  */
 fun NewsItem.isIn(section: NewsSection): Boolean = when (section) {
     NewsSection.Saved -> favorite
     NewsSection.Read -> read
-    else -> !read || favorite
+    else -> !read
 }

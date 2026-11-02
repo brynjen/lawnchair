@@ -41,13 +41,13 @@ class NewsSectionTest {
     }
 
     @Test
-    fun `a read article is in no list but Read, unless it is starred, and Favorites are the starred ones`() {
+    fun `a read article is in no list but Read, starred or not, and Favorites are the starred ones`() {
         val plain = item(1)
         val read = item(2).copy(read = true)
         val keptAfterReading = item(3).copy(read = true, favorite = true)
         val starred = item(4).copy(favorite = true)
         for (section in listOf(NewsSection.Now, NewsSection.Ai, NewsSection.Papers, NewsSection.Norway)) {
-            assertEquals(listOf(1L, 3L, 4L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(section) }.map { it.id })
+            assertEquals(listOf(1L, 4L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(section) }.map { it.id })
         }
         assertEquals(listOf(3L, 4L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(NewsSection.Saved) }.map { it.id })
         assertEquals(listOf(2L, 3L), listOf(plain, read, keptAfterReading, starred).filter { it.isIn(NewsSection.Read) }.map { it.id })
