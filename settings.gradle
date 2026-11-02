@@ -56,7 +56,6 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
-        maven { url 'https://jitpack.io' }
         // The neural-orb AAR (see gradle.neuralOrbAndroid above).
         maven {
             url = gradle.neuralOrbAndroid.repository
@@ -68,6 +67,17 @@ dependencyResolutionManagement {
         maven {
             url = 'https://storage.googleapis.com/download.flutter.io'
             content { includeGroup('io.flutter') }
+        }
+        // Last, and only for what is published nowhere else: JitPack builds any GitHub repository
+        // on request under a name derived from it, so an open entry would let it answer for any
+        // group. Gradle's dependency verification (gradle/verification-metadata.xml) checks what
+        // it serves.
+        maven {
+            url 'https://jitpack.io'
+            content {
+                includeGroup('com.github.ChickenHook')
+                includeGroup('com.github.topjohnwu.libsu')
+            }
         }
     }
 }

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No cleartext anywhere: the launcher talks to https://serverpod.brynje.net, and a plain-HTTP
+     fallback (a library, a redirect) would carry the person's session key in the clear. A debug
+     build overrides this file (debug/res/xml) to let the LAN box and the emulator's host in. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>

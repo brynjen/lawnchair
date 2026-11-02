@@ -348,6 +348,12 @@ android {
             kotlin.directories.addAll('lawnchair/tests')
         }
 
+        // Cleartext to the LAN box and the emulator's host (res/xml/network_security_config.xml
+        // permits none in release).
+        debug {
+            res.srcDirs = ['debug/res']
+        }
+
         github {
             manifest.srcFile "github/AndroidManifest.xml"
         }
