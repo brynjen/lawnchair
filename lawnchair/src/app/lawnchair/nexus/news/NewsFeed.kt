@@ -74,6 +74,8 @@ data class NewsItem(
     val favorite: Boolean = false,
     /** This person has marked it read: it leaves the lists (unless starred) and is found under Read. */
     val read: Boolean = false,
+    /** In the morning's edition (All), its group: `norway`, `world` or `research`; null in any other list. */
+    val editionGroup: String? = null,
 )
 
 /**
@@ -81,11 +83,18 @@ data class NewsItem(
  * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags","kind",
  * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated","alsoIn":[str],
  * "authors":[str],"categories":[str],"arxivId","upvotes","codeUrl","codeStars",
- * "claims":[{"claim","evidence"}],"favorite","read"}],"refreshedAt","nextCursor"}`. [NewsFeed.nextCursor] is where the
- * next page starts, null on the last.
+ * "claims":[{"claim","evidence"}],"favorite","read","editionGroup"}],"refreshedAt","nextCursor","editionAt","editionSize"}`.
+ * [NewsFeed.nextCursor] is where the next page starts, null on the last. [NewsFeed.editionAt] is set when the
+ * list is the morning's edition (All), and [NewsFeed.editionSize] is how many cards it has, read ones included.
  * The same shape is what the on-device cache keeps ([toJson]), so one parser reads both.
  */
-data class NewsFeed(val items: List<NewsItem>, val refreshedAt: Instant?, val nextCursor: String? = null) {
+data class NewsFeed(
+    val items: List<NewsItem>,
+    val refreshedAt: Instant?,
+    val nextCursor: String? = null,
+    val editionAt: Instant? = null,
+    val editionSize: Int = 0,
+) {
     companion object {
         val EMPTY = NewsFeed(emptyList(), null)
     }
@@ -104,6 +113,8 @@ fun parseNewsFeed(text: String): NewsFeed? {
         items = cards.mapNotNull { parseItem(it) }.distinctBy { it.id },
         refreshedAt = parseInstant(feed.text("refreshedAt")),
         nextCursor = feed.text("nextCursor")?.takeIf { it.isNotBlank() },
+        editionAt = parseInstant(feed.text("editionAt")),
+        editionSize = (feed["editionSize"] as? JsonPrimitive)?.longOrNull?.toInt() ?: 0,
     )
 }
 
@@ -140,6 +151,7 @@ private fun parseItem(element: JsonElement): NewsItem? {
         translated = (o["translated"] as? JsonPrimitive)?.booleanOrNull ?: false,
         favorite = (o["favorite"] as? JsonPrimitive)?.booleanOrNull ?: false,
         read = (o["read"] as? JsonPrimitive)?.booleanOrNull ?: false,
+        editionGroup = o.text("editionGroup")?.trim()?.takeIf { it.isNotEmpty() },
     )
 }
 
@@ -194,6 +206,7 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 put("translated", item.translated)
                 put("favorite", item.favorite)
                 put("read", item.read)
+                put("editionGroup", item.editionGroup)
                 putJsonArray("claims") {
                     item.claims.forEach { claim ->
                         addJsonObject {
@@ -207,6 +220,8 @@ fun NewsFeed.toJson(): String = buildJsonObject {
     }
     put("refreshedAt", refreshedAt?.toString())
     put("nextCursor", nextCursor)
+    put("editionAt", editionAt?.toString())
+    put("editionSize", editionSize)
 }.toString()
 
 private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull

@@ -2,11 +2,17 @@ package app.lawnchair.nexuslauncher
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -54,12 +60,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.State
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -67,6 +75,10 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -77,9 +89,11 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.lawnchair.nexus.LocalNexusColors
@@ -115,7 +129,9 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -340,8 +356,10 @@ private fun NewsPanel(
             listState = listState,
             items = (hits ?: feed)?.items,
             serverHits = hits != null,
+            edition = (hits ?: feed)?.takeIf { it.editionAt != null }?.editionSize,
             onDiscuss = onDiscuss,
             onFavorite = onFavorite,
+            onRead = onRead,
             now = now,
             pictures = pictures,
             query = query,
@@ -428,8 +446,11 @@ private fun ListScreen(
     items: List<NewsItem>?,
     /** [items] are the server's answer to [query]: they are not filtered again here. */
     serverHits: Boolean,
+    /** When [items] are the morning's edition (All), how many cards it has, read ones included; else null. */
+    edition: Int?,
     onDiscuss: (NewsItem) -> Unit,
     onFavorite: (NewsItem) -> Unit,
+    onRead: (NewsItem) -> Unit,
     now: Instant,
     pictures: NewsPictures,
     query: String,
@@ -463,7 +484,9 @@ private fun ListScreen(
             contentPadding = PaddingValues(16.dp, 4.dp, 16.dp, 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (items != null && filtered.isEmpty()) {
+            if (items != null && filtered.isEmpty() && edition != null && edition > 0 && query.isBlank()) {
+                item(key = "done") { AllDone() }
+            } else if (items != null && filtered.isEmpty()) {
                 item(key = "empty") {
                     Box(Modifier.fillMaxWidth().padding(vertical = 48.dp), contentAlignment = Alignment.Center) {
                         Text(
@@ -472,7 +495,12 @@ private fun ListScreen(
                                     NewsSection.Papers -> "No research yet.\nThe box reads papers overnight."
                                     NewsSection.Norway -> "No Norwegian news right now.\nThe box reads the news overnight."
                                     NewsSection.Saved -> "No favorites yet.\nTap the star on an article or paper to keep it here."
-                                    NewsSection.Read -> "Nothing read yet.\nMark an article read and it moves here."
+                                    NewsSection.Read -> "Nothing read yet.\nSwipe an article right, or mark it read, and it moves here."
+                                    NewsSection.Now -> if (edition != null) {
+                                        "Nothing in today's edition.\nThe box makes it overnight."
+                                    } else {
+                                        "No news right now.\nThe box reads the news overnight."
+                                    }
                                     else -> "No news right now.\nThe box reads the news overnight."
                                 }
                             } else {
@@ -483,8 +511,19 @@ private fun ListScreen(
                     }
                 }
             }
-            items(filtered, key = { it.id }) {
-                NewsCard(it, now, pictures, query, onDiscuss = { onDiscuss(it) }, onFavorite = { onFavorite(it) }) { onOpen(it) }
+            filtered.forEachIndexed { index, article ->
+                // The edition's groups, each under its own heading.
+                val group = article.editionGroup.takeIf { edition != null }
+                if (group != null && group != filtered.getOrNull(index - 1)?.editionGroup) {
+                    item(key = "group-$group") { GroupHeading(group) }
+                }
+                item(key = article.id) {
+                    SwipeToRead(article.read, onRead = { onRead(article) }, onSwipeLeft = onClose) {
+                        NewsCard(article, now, pictures, query, onDiscuss = { onDiscuss(article) }, onFavorite = { onFavorite(article) }) {
+                            onOpen(article)
+                        }
+                    }
+                }
             }
             if (canLoadMore) {
                 item(key = "more") {
@@ -752,6 +791,149 @@ private fun NewsCard(
                 Chip("Discuss this paper", onDiscuss)
             }
         }
+    }
+}
+
+/** The heading over one of the edition's groups. */
+@Composable
+private fun GroupHeading(group: String) {
+    Text(
+        when (group) {
+            "norway" -> "NORWAY"
+            "world" -> "THE WORLD"
+            "research" -> "RESEARCH"
+            else -> group.uppercase()
+        },
+        style = TextStyle(color = AccentInk, fontSize = 12.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.4.sp),
+        modifier = Modifier.padding(start = 4.dp, top = 12.dp),
+    )
+}
+
+/**
+ * All when every card of the morning's edition is read: the page is finished, and says so. The check
+ * springs in once.
+ */
+@Composable
+private fun AllDone() {
+    val grow = remember { Animatable(0.6f) }
+    LaunchedEffect(Unit) { grow.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)) }
+    Column(
+        Modifier.fillMaxWidth().padding(top = 72.dp, bottom = 48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .size(120.dp)
+                .graphicsLayer {
+                    scaleX = grow.value
+                    scaleY = grow.value
+                }
+                .clip(CircleShape)
+                .background(Accent.copy(alpha = 0.14f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(Modifier.size(84.dp).clip(CircleShape).background(Accent.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
+                CheckIcon(true, 56.dp, Accent, OnAccent)
+            }
+        }
+        Spacer(Modifier.height(28.dp))
+        Text("All done", style = TextStyle(color = TextC, fontSize = 24.sp, fontWeight = FontWeight.Medium))
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "You have read today's edition.\nThe next one is ready tomorrow morning.",
+            style = TextStyle(color = Text2, fontSize = 15.sp, lineHeight = 22.sp, textAlign = TextAlign.Center),
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "Norway, AI and Research go back three days.",
+            style = TextStyle(color = Text3, fontSize = 13.sp, textAlign = TextAlign.Center),
+        )
+    }
+}
+
+/**
+ * A card swiped right is marked read (under Read, unread again): it follows the finger over a check,
+ * and let go past the threshold, or flung, it slides away and the mark is made. A left swipe on it
+ * still closes the panel, as it does anywhere else on the list.
+ */
+@Composable
+private fun SwipeToRead(read: Boolean, onRead: () -> Unit, onSwipeLeft: () -> Unit, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    val thresholdPx = with(density) { 120.dp.toPx() }
+    val widthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    // A mark made, or taken back when the server could not keep it, starts the card where it belongs.
+    val offset = remember(read) { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    // The gesture below outlives recompositions: it reads these as they are now.
+    val latestOffset by rememberUpdatedState(offset)
+    val markRead by rememberUpdatedState(onRead)
+    val swipeLeft by rememberUpdatedState(onSwipeLeft)
+    Box(
+        Modifier
+            .fillMaxWidth()
+            // Not `draggable`: that waits for the finger to pass the slop sideways, and a thumb's arc
+            // passes it upwards first, so the list scrolled instead. Here the card takes the gesture as
+            // soon as it goes more sideways than up or down, and a mostly vertical one stays the list's.
+            .pointerInput(Unit) {
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    var moved = Offset.Zero
+                    while (true) {
+                        val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: return@awaitEachGesture
+                        if (!change.pressed || change.isConsumed) return@awaitEachGesture
+                        moved += change.positionChange()
+                        if (abs(moved.y) > slop && abs(moved.y) >= abs(moved.x)) return@awaitEachGesture
+                        if (abs(moved.x) > slop / 2 && abs(moved.x) > abs(moved.y)) {
+                            change.consume()
+                            break
+                        }
+                    }
+                    val card = latestOffset
+                    val velocity = VelocityTracker()
+                    var dragged = moved.x
+                    scope.launch { card.snapTo(dragged.coerceAtLeast(0f)) }
+                    horizontalDrag(down.id) { change ->
+                        dragged += change.positionChange().x
+                        velocity.addPointerInputChange(change)
+                        change.consume()
+                        scope.launch { card.snapTo(dragged.coerceAtLeast(0f)) }
+                    }
+                    val flung = velocity.calculateVelocity().x
+                    scope.launch {
+                        when {
+                            dragged > thresholdPx || (dragged > 0f && flung > 1500f) -> {
+                                card.animateTo(widthPx)
+                                markRead()
+                            }
+                            dragged < -thresholdPx || flung < -1500f -> {
+                                card.snapTo(0f)
+                                swipeLeft()
+                            }
+                            else -> card.animateTo(0f)
+                        }
+                    }
+                }
+            },
+    ) {
+        if (offset.value > 0f) {
+            Row(
+                Modifier
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(Accent)
+                    .padding(horizontal = 24.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CheckIcon(!read, 24.dp, OnAccent, Accent)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (read) "Mark unread" else "Mark read",
+                    style = TextStyle(color = OnAccent, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                )
+            }
+        }
+        Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }) { content() }
     }
 }
 

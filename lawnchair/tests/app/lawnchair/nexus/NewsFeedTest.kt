@@ -254,4 +254,21 @@ class NewsFeedTest {
         assertEquals(feed, parseNewsFeed(feed.toJson()))
         assertEquals(listOf(false, true, false), parseNewsFeed(feed.toJson())!!.items.map { it.read })
     }
+
+    @Test
+    fun `the morning's edition says when it was made, how many it has and each card's group, and survives the saved copy`() {
+        val feed = parseNewsFeed(
+            """{"cards":[{"id":1,"title":"Budsjett","editionGroup":"norway"},{"id":2,"title":"Paper","editionGroup":"research"}],""" +
+                """"editionAt":"2026-11-02T05:00:00.000Z","editionSize":3}""",
+        )!!
+        assertEquals(java.time.Instant.parse("2026-11-02T05:00:00Z"), feed.editionAt)
+        assertEquals(3, feed.editionSize)
+        assertEquals(listOf("norway", "research"), feed.items.map { it.editionGroup })
+        assertEquals(feed, parseNewsFeed(feed.toJson()))
+
+        val plain = parseNewsFeed("""{"cards":[{"id":1,"title":"Any list"}]}""")!!
+        assertEquals(null, plain.editionAt)
+        assertEquals(0, plain.editionSize)
+        assertEquals(null, plain.items.single().editionGroup)
+    }
 }
