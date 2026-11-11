@@ -173,9 +173,9 @@ android {
         def nexusMobileEnv = rootProject.file("../nexus_mobile/.env.prod")
 
         // The relay's public key, which Eir's /coach/** is sealed to (nexus-health: health data does
-        // not cross the tunnel in the clear). Public, but read like the token: the NEXUS_RELAY_PUBLIC_KEY
-        // env var, local.properties, a Gradle property, or the embedded app's ../nexus_mobile/.env.prod.
-        // Empty means this build shows no Eir card.
+        // not cross the tunnel in the clear). Public: the NEXUS_RELAY_PUBLIC_KEY env var,
+        // local.properties, a Gradle property, or the embedded app's ../nexus_mobile/.env.prod name
+        // another nexus's key; with none of them it is the owner's nexus's, kept here.
         def nexusMobileRelayKey = null
         if (nexusMobileEnv.exists()) {
             nexusMobileEnv.eachLine { line ->
@@ -186,7 +186,7 @@ android {
         def nexusRelayPublicKey = System.getenv("NEXUS_RELAY_PUBLIC_KEY") ?:
             (nexusLocalProps.getProperty("NEXUS_RELAY_PUBLIC_KEY") ?:
             (project.findProperty("NEXUS_RELAY_PUBLIC_KEY") ?:
-            (nexusMobileRelayKey ?: "")))
+            (nexusMobileRelayKey ?: "HnyfCI/4AbdpPkwmQCoeUJCfA6q0rFp87o6BrtGlnzE=")))
         buildConfigField "String", "NEXUS_RELAY_PUBLIC_KEY", "\"${nexusRelayPublicKey}\""
 
         manifestPlaceholders.quickstepMinSdk = quickstepMinSdk
