@@ -62,6 +62,7 @@ class NexusAppActivity : FlutterFragmentActivity() {
         NexusBudsTrigger.sync(this)
         // A person who has just signed in is listened for from now, not from the next restart.
         app.lawnchair.nexus.push.NexusPushTrigger.sync(this)
+        NexusBannerSync.refresh(this)
     }
 
     override fun onPause() {

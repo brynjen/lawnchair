@@ -480,6 +480,9 @@ class LawnchairLauncher : QuickstepLauncher() {
         restartIfPending()
         // The home screen is in front: where Nexus's push connection may be started if it is not up.
         app.lawnchair.nexus.push.NexusPushTrigger.sync(this)
+        // And where Nexus's banner is brought up to date, and the person asked once to let it listen.
+        app.lawnchair.nexus.NexusBannerSync.refresh(this)
+        app.lawnchair.nexus.NexusBackgroundListening.askOnce(this)
         refreshPredictionContainersFromModel()
 
         dragLayer.viewTreeObserver.addOnDrawListener(

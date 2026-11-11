@@ -96,6 +96,18 @@ class NexusClient(
             post(base, "/push", token, JSONObject().put("method", "subscription")),
         )
 
+    /** `POST /banner {"method":"state"}` → the banner: `{"version","headline","lines","actions","notice"}`. */
+    suspend fun bannerState(base: String, token: String): app.lawnchair.nexus.BannerState =
+        app.lawnchair.nexus.parseBannerState(post(base, "/banner", token, JSONObject().put("method", "state")))
+
+    /** `POST /banner {"id", "method":"act"}` → the banner as it is after the action. */
+    suspend fun bannerAct(base: String, token: String, id: String): app.lawnchair.nexus.BannerState =
+        app.lawnchair.nexus.parseBannerState(post(base, "/banner", token, JSONObject().put("id", id).put("method", "act")))
+
+    /** `POST /banner {"id", "method":"jobNotice"}` → `{"title","text"}`, or `null`. */
+    suspend fun bannerJobNotice(base: String, token: String, id: Int): app.lawnchair.nexus.BannerNotice? =
+        app.lawnchair.nexus.parseBannerNotice(post(base, "/banner", token, JSONObject().put("id", id).put("method", "jobNotice")))
+
     /** `POST /voiceSquad {conversationId, userText, turnId, voice?, method:"submitTurn"}` → void. */
     override suspend fun submitTurn(
         base: String,

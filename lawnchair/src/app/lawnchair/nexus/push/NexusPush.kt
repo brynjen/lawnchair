@@ -14,6 +14,12 @@ sealed interface PushEvent {
     /** A notification: [id] is ntfy's, and what the next connection asks for everything since. */
     data class Message(val id: String, val title: String, val text: String) : PushEvent
 
+    /**
+     * The server's word that the banner changed: never shown. [jobs] are the jobs that left the card,
+     * whose end may be a notification for this person. [id] is ntfy's, kept like a message's.
+     */
+    data class Nudge(val id: String, val jobs: List<Int>) : PushEvent
+
     data object Other : PushEvent
 }
 
@@ -24,10 +30,17 @@ fun parsePushEvent(frame: String): PushEvent {
         "keepalive" -> PushEvent.Keepalive
         "message" -> {
             val id = json.optString("id")
-            if (id.isEmpty()) {
-                PushEvent.Other
-            } else {
-                PushEvent.Message(id = id, title = json.optString("title"), text = json.optString("message"))
+            val text = json.optString("message")
+            val nudge = if (text.startsWith("{")) runCatching { JSONObject(text) }.getOrNull() else null
+            when {
+                id.isEmpty() -> PushEvent.Other
+                nudge?.optString("nexus") == "banner" -> {
+                    val jobs = nudge.optJSONArray("jobs")
+                    PushEvent.Nudge(id, List(jobs?.length() ?: 0) { jobs!!.optInt(it) })
+                }
+                // A word of Nexus's own that this build does not know is not a notification either.
+                nudge?.has("nexus") == true -> PushEvent.Other
+                else -> PushEvent.Message(id = id, title = json.optString("title"), text = text)
             }
         }
         else -> PushEvent.Other

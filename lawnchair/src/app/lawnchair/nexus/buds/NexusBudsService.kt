@@ -43,6 +43,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/** Sent to [NexusBudsService] by the banner's Stop button. */
+const val BUDS_ACTION_STOP_TURN = "app.lawnchair.nexus.buds.STOP_TURN"
+
 /**
  * Lets a double tap on Bluetooth earbuds (the next-track key) start a turn with Nexus, with the app in
  * the background and the screen off.
@@ -162,10 +165,15 @@ class NexusBudsService : Service() {
         audio.registerAudioDeviceCallback(deviceCallback, handler)
         audio.registerAudioPlaybackCallback(playbackCallback, handler)
         cues.prefetch()
+        app.lawnchair.nexus.NexusBannerSync.attach(this)
         Log.i(TAG, "buds_listening")
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
+    /** The banner's Stop ends the turn that is going on, as a tap that cancels does. */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == BUDS_ACTION_STOP_TURN) act(BudsAction.Cancel)
+        return START_STICKY
+    }
 
     /**
      * Makes this session the one the earbuds' media keys go to: playing, with a moment of real (silent)

@@ -56,6 +56,9 @@
          which only a foreground service keeps through Doze. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Asked of the person once: without it a launcher that restarts with the screen off may not
+         start the push connection until the next unlock. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="com.google.android.apps.nexuslauncher.permission.QSB" />
     <uses-permission android:name="com.kieronquinn.app.smartspacer.permission.ACCESS_SMARTSPACER"/>
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -250,6 +253,19 @@
             android:name="app.lawnchair.nexus.push.NexusPushService"
             android:exported="false"
             android:foregroundServiceType="remoteMessaging" />
+
+        <!-- The buttons of Nexus's banner, and the question before one that ends a job. -->
+        <receiver
+            android:name="app.lawnchair.nexus.NexusBannerReceiver"
+            android:exported="false" />
+
+        <activity
+            android:name="app.lawnchair.nexus.NexusBannerConfirmActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Push on or off from adb, for a battery measurement with it and one without. Only the
              shell holds DUMP. -->

@@ -15,6 +15,7 @@ import android.os.PowerManager
 import android.util.Log
 import app.lawnchair.nexus.NexusAppActivity
 import app.lawnchair.nexus.NexusBanner
+import app.lawnchair.nexus.NexusBannerSync
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.networkUp
@@ -86,6 +87,7 @@ class NexusPushService : Service() {
             // back starts over at once, with no retry wait left from the one that went.
             networkUp(this@NexusPushService).collectLatest { up -> if (up) listenForGood() }
         }
+        NexusBannerSync.attach(this)
         Log.i(TAG, "push_service_started")
     }
 
@@ -188,6 +190,11 @@ class NexusPushService : Service() {
                             banner(received = (NexusBanner.push?.received ?: 0) + 1)
                             show(event)
                         }
+                        is PushEvent.Nudge -> {
+                            stats.message()
+                            prefs.edit().putString(KEY_LAST_ID, event.id).apply()
+                            NexusBannerSync.onNudge(this@NexusPushService, event.jobs)
+                        }
                         PushEvent.Other -> Unit
                     }
                 }
@@ -219,35 +226,14 @@ class NexusPushService : Service() {
         NexusBanner.show(this)
     }
 
-    private fun show(message: PushEvent.Message) {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(MESSAGE_CHANNEL, "Notifications from Nexus", NotificationManager.IMPORTANCE_DEFAULT),
-        )
-        val open = PendingIntent.getActivity(
-            this,
-            2,
-            Intent(this, NexusAppActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        manager.notify(
-            message.id.hashCode(),
-            Notification.Builder(this, MESSAGE_CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(message.title.ifEmpty { "Nexus" })
-                .setContentText(message.text.take(160))
-                .setStyle(Notification.BigTextStyle().bigText(message.text.take(600)))
-                .setContentIntent(open)
-                .setAutoCancel(true)
-                .build(),
-        )
-    }
+    private fun show(message: PushEvent.Message) = postPushNotification(this, message.id, message.title, message.text)
 
     /** `adb shell dumpsys activity service NexusPushService`: counts and times, never a message's text. */
     override fun dump(fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {
         stats.lines().forEach(writer::println)
         val exempt = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
         writer.println("push keepaliveSeconds=$keepaliveSeconds trafficTag=0x${TRAFFIC_TAG.toString(16)} batteryExempt=$exempt")
+        writer.println("banner nudges=${NexusBannerSync.nudges} fetches=${NexusBannerSync.fetches}")
     }
 
     /** Every socket of the push client carries [TRAFFIC_TAG], whichever of OkHttp's threads opens it. */
@@ -276,11 +262,40 @@ class NexusPushService : Service() {
         private const val KEY_ADDRESS = "address"
         private const val KEY_KEEPALIVE = "keepaliveSeconds"
         private const val KEY_LAST_ID = "lastId"
-        private const val MESSAGE_CHANNEL = "nexus_push"
 
         /** "NXPU": what the push socket's bytes are counted under in `dumpsys netstats detail`. */
         const val TRAFFIC_TAG = 0x4E585055
     }
+}
+
+private const val MESSAGE_CHANNEL = "nexus_push"
+
+/**
+ * A notification from Nexus: a message of the push socket, or a job's end the server worded for this
+ * person. One for each [key]; a tap opens the app.
+ */
+fun postPushNotification(context: Context, key: String, title: String, text: String) {
+    val manager = context.getSystemService(NotificationManager::class.java)
+    manager.createNotificationChannel(
+        NotificationChannel(MESSAGE_CHANNEL, "Notifications from Nexus", NotificationManager.IMPORTANCE_DEFAULT),
+    )
+    val open = PendingIntent.getActivity(
+        context,
+        2,
+        Intent(context, NexusAppActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+    manager.notify(
+        key.hashCode(),
+        Notification.Builder(context, MESSAGE_CHANNEL)
+            .setSmallIcon(com.android.launcher3.R.drawable.ic_nexus_status)
+            .setContentTitle(title.ifEmpty { "Nexus" })
+            .setContentText(text.take(160))
+            .setStyle(Notification.BigTextStyle().bigText(text.take(600)))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build(),
+    )
 }
 
 /**
@@ -316,7 +331,11 @@ object NexusPushTrigger {
             NexusConfig.read(app).enabled
         runCatching {
             if (wanted) app.startForegroundService(intent) else app.stopService(intent)
-        }.onFailure { Log.w(TAG, "push_sync_failed wanted=$wanted", it) }
+        }.onFailure {
+            Log.w(TAG, "push_sync_failed wanted=$wanted", it)
+            // Refused from the background: said in the shade, until the next unlock starts it.
+            if (wanted) NexusBanner.showNotListening(app)
+        }
     }
 }
 
