@@ -25,6 +25,7 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import app.lawnchair.nexus.NexusAppActivity
+import app.lawnchair.nexus.NexusBanner
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.chat.MicGesture
 import app.lawnchair.nexus.chat.Mode
@@ -131,12 +132,10 @@ class NexusBudsService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val channel = NotificationChannel(CHANNEL, "Earbud double-tap", NotificationManager.IMPORTANCE_LOW)
-        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         runCatching {
             ServiceCompat.startForeground(
                 this,
-                NOTIFICATION_ID,
+                NexusBanner.ID,
                 notification(TurnPhase.Idle),
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0,
             )
@@ -207,6 +206,9 @@ class NexusBudsService : Service() {
     }
 
     override fun onDestroy() {
+        // Its line leaves Nexus's banner; the banner stays while the push connection stands behind it.
+        NexusBanner.voice = null
+        NexusBanner.show(this)
         handler.removeCallbacksAndMessages(null)
         NexusBudsBridge.onConversation = null
         NexusBudsBridge.onLeft = null
@@ -370,7 +372,7 @@ class NexusBudsService : Service() {
 
     private fun show(text: String?) {
         val manager = getSystemService(NotificationManager::class.java)
-        manager.notify(NOTIFICATION_ID, notification(phase, text))
+        manager.notify(NexusBanner.ID, notification(phase, text))
     }
 
     private fun notification(phase: TurnPhase, override: String? = null): Notification {
@@ -381,28 +383,13 @@ class NexusBudsService : Service() {
             TurnPhase.AwaitingAnswer -> "Waiting for your answer — double-tap to speak"
             else -> "Double-tap your earbuds to talk to Nexus"
         }
-        val open = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, NexusAppActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
-        )
-        return Notification.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Nexus")
-            .setContentText(text)
-            .setContentIntent(open)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(Notification.CATEGORY_SERVICE)
-            .build()
+        // Nexus has one banner for everything it does in the background: this is its earbuds' line.
+        NexusBanner.voice = NexusBanner.VoiceLine(text, inTurn = override != null || phase != TurnPhase.Idle)
+        return NexusBanner.build(this)
     }
 
     private companion object {
         const val TAG = "NexusBuds"
-        const val CHANNEL = "nexus_buds"
-        const val NOTIFICATION_ID = 7410
-
         /** How long the cue plays before the mic opens, so it is not heard as speech. */
         const val CUE_MS = 220L
 

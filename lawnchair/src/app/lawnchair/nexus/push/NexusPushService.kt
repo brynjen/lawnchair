@@ -14,6 +14,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import app.lawnchair.nexus.NexusAppActivity
+import app.lawnchair.nexus.NexusBanner
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.networkUp
@@ -44,7 +45,8 @@ import okhttp3.WebSocketListener
  * held for as long as a person is signed in, and a notification for each message that arrives on it.
  * No Google service and no second app: the launcher is the process that is always there.
  *
- * It is a foreground service because that is what lets a socket live through Doze: the system cuts
+ * It stands behind Nexus's one banner ([NexusBanner]), where its line says since when it has listened
+ * and how much has come. It is a foreground service because that is what lets a socket live through Doze: the system cuts
  * the network of every app that is not in front, running a foreground service or let off battery
  * optimisation. The connection is written to once an interval from each end (ours here, the
  * server's by its `keepalive-interval`), on the beat the server names with the address
@@ -93,24 +95,20 @@ class NexusPushService : Service() {
      * a start left unanswered is a crash a few seconds later.
      */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(SERVICE_CHANNEL, "Listening for notifications", NotificationManager.IMPORTANCE_MIN),
-        )
+        if (NexusBanner.push == null) NexusBanner.push = NexusBanner.PushLine(connectedAt = null, received = 0)
         ServiceCompat.startForeground(
             this,
-            SERVICE_NOTIFICATION_ID,
-            Notification.Builder(this, SERVICE_CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_popup_reminder)
-                .setContentTitle("Nexus is listening for notifications")
-                .setOngoing(true)
-                .build(),
+            NexusBanner.ID,
+            NexusBanner.build(this),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
         )
         return START_STICKY
     }
 
     override fun onDestroy() {
+        // Its line leaves Nexus's banner; the banner stays while the earbuds' service stands behind it.
+        NexusBanner.push = null
+        NexusBanner.show(this)
         scope.cancel()
         Log.i(TAG, "push_service_stopped")
         super.onDestroy()
@@ -180,12 +178,14 @@ class NexusPushService : Service() {
                         PushEvent.Open -> {
                             opened = true
                             stats.opened()
+                            banner(connectedAt = System.currentTimeMillis())
                             Log.i(TAG, "push_open")
                         }
                         PushEvent.Keepalive -> stats.keepalive()
                         is PushEvent.Message -> {
                             stats.message()
                             prefs.edit().putString(KEY_LAST_ID, event.id).apply()
+                            banner(received = (NexusBanner.push?.received ?: 0) + 1)
                             show(event)
                         }
                         PushEvent.Other -> Unit
@@ -199,6 +199,7 @@ class NexusPushService : Service() {
 
                 private fun over(why: String) {
                     stats.lost(why)
+                    banner(connectedAt = null)
                     Log.i(TAG, "push_lost $why")
                     if (cont.isActive) cont.resume(opened)
                 }
@@ -207,10 +208,21 @@ class NexusPushService : Service() {
         cont.invokeOnCancellation { socket.cancel() }
     }
 
+    /** Rewrites the push line of Nexus's banner: when it began listening (null: it is not), what has come. */
+    private fun banner(
+        connectedAt: Long? = NexusBanner.push?.connectedAt,
+        received: Int = NexusBanner.push?.received ?: 0,
+    ) {
+        val line = NexusBanner.PushLine(connectedAt, received)
+        if (line == NexusBanner.push) return
+        NexusBanner.push = line
+        NexusBanner.show(this)
+    }
+
     private fun show(message: PushEvent.Message) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
-            NotificationChannel(MESSAGE_CHANNEL, "Nexus", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(MESSAGE_CHANNEL, "Notifications from Nexus", NotificationManager.IMPORTANCE_DEFAULT),
         )
         val open = PendingIntent.getActivity(
             this,
@@ -264,9 +276,7 @@ class NexusPushService : Service() {
         private const val KEY_ADDRESS = "address"
         private const val KEY_KEEPALIVE = "keepaliveSeconds"
         private const val KEY_LAST_ID = "lastId"
-        private const val SERVICE_CHANNEL = "nexus_push_service"
         private const val MESSAGE_CHANNEL = "nexus_push"
-        private const val SERVICE_NOTIFICATION_ID = 4711
 
         /** "NXPU": what the push socket's bytes are counted under in `dumpsys netstats detail`. */
         const val TRAFFIC_TAG = 0x4E585055
