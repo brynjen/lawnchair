@@ -478,6 +478,8 @@ class LawnchairLauncher : QuickstepLauncher() {
     override fun onResume() {
         super.onResume()
         restartIfPending()
+        // The home screen is in front: where Nexus's push connection may be started if it is not up.
+        app.lawnchair.nexus.push.NexusPushTrigger.sync(this)
         refreshPredictionContainersFromModel()
 
         dragLayer.viewTreeObserver.addOnDrawListener(

@@ -79,6 +79,20 @@ class NexusPushService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        scope.launch {
+            // One connection while there is a network, none while there is not: a network that comes
+            // back starts over at once, with no retry wait left from the one that went.
+            networkUp(this@NexusPushService).collectLatest { up -> if (up) listenForGood() }
+        }
+        Log.i(TAG, "push_service_started")
+    }
+
+    /**
+     * Every `startForegroundService` must be answered with `startForeground`, also when the service
+     * already runs (the trigger asks again each time the home screen or the app comes to the front):
+     * a start left unanswered is a crash a few seconds later.
+     */
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(SERVICE_CHANNEL, "Listening for notifications", NotificationManager.IMPORTANCE_MIN),
@@ -93,15 +107,8 @@ class NexusPushService : Service() {
                 .build(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING,
         )
-        scope.launch {
-            // One connection while there is a network, none while there is not: a network that comes
-            // back starts over at once, with no retry wait left from the one that went.
-            networkUp(this@NexusPushService).collectLatest { up -> if (up) listenForGood() }
-        }
-        Log.i(TAG, "push_service_started")
+        return START_STICKY
     }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
     override fun onDestroy() {
         scope.cancel()
@@ -269,7 +276,9 @@ class NexusPushService : Service() {
 /**
  * Starts and stops [NexusPushService] to match the app's saved `settings.push.enabled` (on unless
  * switched off) and whether a person is signed in: when the setting changes, when the launcher
- * starts, and whenever the app comes to the front.
+ * starts, and whenever the home screen or the app comes to the front. In front is the only place a
+ * foreground service may be started from: a launcher process that comes up in the background (after
+ * an update, seen on the Pixel 2026-11-11) is refused, and listens from the next time it is seen.
  */
 object NexusPushTrigger {
     private const val TAG = "NexusPush"
