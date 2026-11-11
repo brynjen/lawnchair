@@ -34,10 +34,10 @@ interface NexusTransport {
     suspend fun readyCue(base: String, token: String, language: String?): ByteArray? = null
 
     /**
-     * Where this person's phone listens for notifications: the ntfy topic's whole address
-     * (`POST /push {"method":"subscription"}`), or null when the server has none.
+     * Where this person's phone listens for notifications and on what beat
+     * (`POST /push {"method":"subscription"}`), or null when the server has no ntfy.
      */
-    suspend fun pushSubscription(base: String, token: String): String? = null
+    suspend fun pushSubscription(base: String, token: String): app.lawnchair.nexus.push.PushSubscription? = null
 
     /**
      * Fire the LLM turn. Fire-and-forget by contract: the server blocks for the whole LLM+TTS

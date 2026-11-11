@@ -46,9 +46,11 @@ import okhttp3.WebSocketListener
  *
  * It is a foreground service because that is what lets a socket live through Doze: the system cuts
  * the network of every app that is not in front, running a foreground service or let off battery
- * optimisation. The connection is written to once every [PING_MINUTES] minutes from each end (ours
- * here, the server's by its `keepalive-interval`), both on timers that start when it opens, so the
- * radio is woken once per interval and not twice.
+ * optimisation. The connection is written to once an interval from each end (ours here, the
+ * server's by its `keepalive-interval`), on the beat the server names with the address
+ * ([PushSubscription.keepaliveSeconds]: 90 through the Cloudflare tunnel, which closes a WebSocket
+ * that is quiet for about 100). Both timers start when the socket opens, so the radio is woken
+ * once per interval and not twice.
  *
  * Its bytes carry a tag of their own ([TRAFFIC_TAG]) so `dumpsys netstats detail` counts them apart
  * from everything else the launcher sends, and [dump] says how often the connection opened, dropped
@@ -64,11 +66,13 @@ class NexusPushService : Service() {
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(0, TimeUnit.SECONDS) // a socket that is quiet for minutes is the point
-            .pingInterval(PING_MINUTES, TimeUnit.MINUTES)
+            .readTimeout(0, TimeUnit.SECONDS) // a socket that is quiet between keepalives is the point
             .socketFactory(TaggedSockets)
             .build()
     }
+
+    // The beat of the connection that stands, for [dump].
+    @Volatile private var keepaliveSeconds = 0
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -109,45 +113,59 @@ class NexusPushService : Service() {
     private suspend fun listenForGood() {
         var failures = 0
         while (true) {
-            val address = address()
-            if (address == null) {
+            val subscription = subscription()
+            if (subscription == null) {
                 // No server to ask, nobody signed in, or a server with no ntfy: nothing to hold a
                 // socket for. The trigger starts the service again when the app is next opened.
                 Log.i(TAG, "push_no_address")
                 stopSelf()
                 return
             }
-            val url = pushSocketUrl(address, prefs.getString(KEY_LAST_ID, null))
+            val url = pushSocketUrl(subscription.url, prefs.getString(KEY_LAST_ID, null))
             if (url == null) {
                 Log.w(TAG, "push_bad_address")
                 stopSelf()
                 return
             }
-            val opened = listen(url)
+            keepaliveSeconds = subscription.keepaliveSeconds
+            val opened = listen(url, subscription.keepaliveSeconds)
             failures = if (opened) 1 else failures + 1
             delay(pushRetrySeconds(failures) * 1000L)
         }
     }
 
     /**
-     * The topic's address: the server's answer, kept so a phone that cannot reach the server (it is
-     * off the LAN, the server is restarting) still listens where it was last told to.
+     * Where to listen: the server's answer, kept so a phone that cannot reach the server (it is
+     * restarting, the network is half up) still listens where it was last told to.
      */
-    private suspend fun address(): String? {
+    private suspend fun subscription(): PushSubscription? {
         val status = NexusConfig.read(this)
         if (!status.enabled) return null
         val asked = runCatching { NexusClient().pushSubscription(status.serverUrl, status.authKey) }
         asked.onSuccess { answer ->
-            prefs.edit().apply { if (answer == null) remove(KEY_ADDRESS) else putString(KEY_ADDRESS, answer) }.apply()
+            prefs.edit().apply {
+                if (answer == null) {
+                    remove(KEY_ADDRESS)
+                } else {
+                    putString(KEY_ADDRESS, answer.url)
+                    putInt(KEY_KEEPALIVE, answer.keepaliveSeconds)
+                }
+            }.apply()
             return answer
         }
-        return prefs.getString(KEY_ADDRESS, null)
+        val kept = prefs.getString(KEY_ADDRESS, null) ?: return null
+        return PushSubscription(kept, prefs.getInt(KEY_KEEPALIVE, DEFAULT_KEEPALIVE_SECONDS))
     }
 
-    /** Holds one socket until it closes or fails. True when the server had answered `open` on it. */
-    private suspend fun listen(url: String): Boolean = suspendCancellableCoroutine { cont ->
+    /**
+     * Holds one socket until it closes or fails, pinging every [pingSeconds]. True when the server
+     * had answered `open` on it.
+     */
+    private suspend fun listen(url: String, pingSeconds: Int): Boolean = suspendCancellableCoroutine { cont ->
         var opened = false
-        val socket = http.newWebSocket(
+        // The same connection pool and sockets, with this subscription's beat.
+        val client = http.newBuilder().pingInterval(pingSeconds.toLong(), TimeUnit.SECONDS).build()
+        val socket = client.newWebSocket(
             Request.Builder().url(url).build(),
             object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -210,7 +228,7 @@ class NexusPushService : Service() {
     override fun dump(fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {
         stats.lines().forEach(writer::println)
         val exempt = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
-        writer.println("push pingMinutes=$PING_MINUTES trafficTag=0x${TRAFFIC_TAG.toString(16)} batteryExempt=$exempt")
+        writer.println("push keepaliveSeconds=$keepaliveSeconds trafficTag=0x${TRAFFIC_TAG.toString(16)} batteryExempt=$exempt")
     }
 
     /** Every socket of the push client carries [TRAFFIC_TAG], whichever of OkHttp's threads opens it. */
@@ -237,13 +255,11 @@ class NexusPushService : Service() {
         private const val TAG = "NexusPush"
         private const val PREFS = "nexus_push"
         private const val KEY_ADDRESS = "address"
+        private const val KEY_KEEPALIVE = "keepaliveSeconds"
         private const val KEY_LAST_ID = "lastId"
         private const val SERVICE_CHANNEL = "nexus_push_service"
         private const val MESSAGE_CHANNEL = "nexus_push"
         private const val SERVICE_NOTIFICATION_ID = 4711
-
-        /** How often this end writes to an idle connection; the server's `keepalive-interval` is the same. */
-        const val PING_MINUTES = 5L
 
         /** "NXPU": what the push socket's bytes are counted under in `dumpsys netstats detail`. */
         const val TRAFFIC_TAG = 0x4E585055

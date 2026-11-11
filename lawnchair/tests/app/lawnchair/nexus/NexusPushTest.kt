@@ -2,7 +2,9 @@ package app.lawnchair.nexus
 
 import app.lawnchair.nexus.push.PushEvent
 import app.lawnchair.nexus.push.PushStats
+import app.lawnchair.nexus.push.PushSubscription
 import app.lawnchair.nexus.push.parsePushEvent
+import app.lawnchair.nexus.push.parsePushSubscription
 import app.lawnchair.nexus.push.pushRetrySeconds
 import app.lawnchair.nexus.push.pushSocketUrl
 import org.junit.Assert.assertEquals
@@ -40,6 +42,22 @@ class NexusPushTest {
         assertNull(pushSocketUrl("http://192.168.0.74:8087/a/b", null))
         assertNull(pushSocketUrl("ftp://host/topic", null))
         assertNull(pushSocketUrl("", null))
+    }
+
+    @Test
+    fun `the server's answer says where to listen and on what beat`() {
+        assertEquals(
+            PushSubscription("https://notifications.example.net/nexus-abc", 90),
+            parsePushSubscription(
+                """{"__className__":"PushSubscription","url":"https://notifications.example.net/nexus-abc","keepaliveSeconds":90}""",
+            ),
+        )
+        assertEquals(300, parsePushSubscription("""{"url":"http://h/t","keepaliveSeconds":300}""")!!.keepaliveSeconds)
+        assertEquals(90, parsePushSubscription("""{"url":"http://h/t"}""")!!.keepaliveSeconds)
+        assertEquals(30, parsePushSubscription("""{"url":"http://h/t","keepaliveSeconds":1}""")!!.keepaliveSeconds)
+        assertNull(parsePushSubscription("null"))
+        assertNull(parsePushSubscription(""))
+        assertNull(parsePushSubscription("""{"keepaliveSeconds":90}"""))
     }
 
     @Test

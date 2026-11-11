@@ -35,6 +35,24 @@ fun parsePushEvent(frame: String): PushEvent {
 }
 
 /**
+ * Where to listen and on what beat: the server's answer to `push.subscription`. [keepaliveSeconds]
+ * is the ntfy server's own keepalive interval; this end pings on the same one, so the two land
+ * together and the radio is woken once.
+ */
+data class PushSubscription(val url: String, val keepaliveSeconds: Int)
+
+/** The server's answer as it comes (`{"url":…,"keepaliveSeconds":…}` or `null`); null when there is none. */
+fun parsePushSubscription(body: String): PushSubscription? {
+    val json = runCatching { JSONObject(body.trim()) }.getOrNull() ?: return null
+    val url = json.optString("url")
+    if (url.isEmpty()) return null
+    return PushSubscription(url, json.optInt("keepaliveSeconds", DEFAULT_KEEPALIVE_SECONDS).coerceIn(30, 3600))
+}
+
+/** Under the 100 seconds after which Cloudflare closes a quiet WebSocket. */
+const val DEFAULT_KEEPALIVE_SECONDS = 90
+
+/**
  * The WebSocket address of a topic: `http://host/topic` is `ws://host/topic/ws`, `https` is `wss`.
  * With [since] (the last message's id) the server first sends what came while nobody listened, so a
  * dropped connection loses nothing ntfy still holds. Null for an address that is not one topic's.
