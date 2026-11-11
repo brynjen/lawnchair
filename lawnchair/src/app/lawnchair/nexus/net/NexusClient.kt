@@ -90,6 +90,13 @@ class NexusClient(
         return b64.takeIf { it.isNotEmpty() }?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
     }
 
+    /** `POST /push {"method":"subscription"}` → the topic's address as a JSON string, or `null`. */
+    override suspend fun pushSubscription(base: String, token: String): String? {
+        val body = post(base, "/push", token, JSONObject().put("method", "subscription")).trim()
+        if (body == "null" || body.isEmpty()) return null
+        return JSONArray("[$body]").optString(0).takeIf { it.isNotEmpty() }
+    }
+
     /** `POST /voiceSquad {conversationId, userText, turnId, voice?, method:"submitTurn"}` → void. */
     override suspend fun submitTurn(
         base: String,

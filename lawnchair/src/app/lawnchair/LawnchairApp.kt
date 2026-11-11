@@ -78,6 +78,7 @@ class LawnchairApp :
         instance = this
         // Double-tap on the earbuds talks to Nexus while the setting is on (the app's Microphone page).
         app.lawnchair.nexus.buds.NexusBudsTrigger.watch(this)
+        app.lawnchair.nexus.push.NexusPushTrigger.watch(this)
         QuickStepContract.sRecentsDisabled = !recentsEnabled
         Flowerpot.Manager.getInstance(this)
         registerActivityLifecycleCallbacks(activityHandler)

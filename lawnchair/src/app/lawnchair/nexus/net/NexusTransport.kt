@@ -34,6 +34,12 @@ interface NexusTransport {
     suspend fun readyCue(base: String, token: String, language: String?): ByteArray? = null
 
     /**
+     * Where this person's phone listens for notifications: the ntfy topic's whole address
+     * (`POST /push {"method":"subscription"}`), or null when the server has none.
+     */
+    suspend fun pushSubscription(base: String, token: String): String? = null
+
+    /**
      * Fire the LLM turn. Fire-and-forget by contract: the server blocks for the whole LLM+TTS
      * pipeline (well past the ~20s RPC timeout), so callers must not await completion here — drive
      * completion off [streamTurn] instead. [turnId] correlates the resulting stream events. [voice]

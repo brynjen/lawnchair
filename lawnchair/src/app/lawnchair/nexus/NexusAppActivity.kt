@@ -60,6 +60,8 @@ class NexusAppActivity : FlutterFragmentActivity() {
         NexusBudsBridge.resumed = true
         // In front is where the double-tap service may be started (e.g. after a reboot), if it is wanted.
         NexusBudsTrigger.sync(this)
+        // A person who has just signed in is listened for from now, not from the next restart.
+        app.lawnchair.nexus.push.NexusPushTrigger.sync(this)
     }
 
     override fun onPause() {
