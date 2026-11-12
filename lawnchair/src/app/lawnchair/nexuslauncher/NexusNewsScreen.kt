@@ -88,6 +88,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -105,6 +106,7 @@ import app.lawnchair.nexus.box.BoxOrbState
 import app.lawnchair.nexus.box.boxOrbStates
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.networkUp
+import app.lawnchair.nexus.news.ArticleBlock
 import app.lawnchair.nexus.news.NewsCache
 import app.lawnchair.nexus.news.NewsClaim
 import app.lawnchair.nexus.news.NewsFeed
@@ -112,6 +114,10 @@ import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsImageCache
 import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.news.NewsKind
+import app.lawnchair.nexus.news.NewsReport
+import app.lawnchair.nexus.news.articleBlocks
+import app.lawnchair.nexus.news.inlineRuns
+import app.lawnchair.nexus.news.isAttribution
 import app.lawnchair.nexus.news.NewsSection
 import app.lawnchair.nexus.news.authorLine
 import app.lawnchair.nexus.news.compactCount
@@ -1144,6 +1150,10 @@ private fun DetailsScreen(
     val context = LocalContext.current
     val paper = article.kind == NewsKind.Paper
     var heroMissing by remember(article.id) { mutableStateOf(false) }
+    // The article as the box wrote it up: its lead stands where the summary would, the rest under the numbers.
+    val blocks = remember(article.id, article.articleMarkdown) { article.articleMarkdown?.let(::articleBlocks).orEmpty() }
+    val lead = blocks.firstOrNull() as? ArticleBlock.Paragraph
+    val rest = if (lead != null) blocks.drop(1) else blocks
     Column(
         Modifier
             .fillMaxSize()
@@ -1214,7 +1224,13 @@ private fun DetailsScreen(
                     }
                 }
 
-                if (article.synopsis.isNotBlank()) {
+                if (lead != null) {
+                    Spacer(Modifier.height(18.dp))
+                    Text(
+                        inlineText(lead.text),
+                        style = TextStyle(color = TextC, fontSize = 18.sp, lineHeight = 27.sp, fontWeight = FontWeight.Medium),
+                    )
+                } else if (article.synopsis.isNotBlank()) {
                     Spacer(Modifier.height(18.dp))
                     if (paper) SectionHeading("Summary")
                     Text(article.synopsis, style = TextStyle(color = TextC, fontSize = 17.sp, lineHeight = 26.sp))
@@ -1266,13 +1282,37 @@ private fun DetailsScreen(
                     FigureGrid(article.figures)
                 }
 
-                article.body?.let {
-                    Spacer(Modifier.height(SECTION_GAP))
-                    SectionHeading("In more detail")
-                    FoldedText(it)
+                if (blocks.isNotEmpty()) {
+                    // The whole article, never folded: it is what the card opens for.
+                    if (rest.isNotEmpty()) {
+                        Spacer(Modifier.height(SECTION_GAP))
+                        ArticleBody(rest)
+                    }
+                } else {
+                    article.body?.let {
+                        Spacer(Modifier.height(SECTION_GAP))
+                        SectionHeading("In more detail")
+                        Text(it, style = TextStyle(color = Text2, fontSize = 15.sp, lineHeight = 23.sp))
+                    }
                 }
 
-                if (article.url.isNotBlank()) {
+                if (article.sources.size > 1) {
+                    // A story several outlets reported: each report, where a lone article has "Open original".
+                    Spacer(Modifier.height(SECTION_GAP))
+                    SectionHeading("Sources")
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        article.sources.forEach { report ->
+                            SourceRow(report) {
+                                runCatching {
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(report.url))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (article.url.isNotBlank()) {
                     Spacer(Modifier.height(SECTION_GAP))
                     Box(
                         Modifier
@@ -1444,32 +1484,93 @@ private fun FigureTile(figure: NewsFigure, modifier: Modifier = Modifier) {
     }
 }
 
-/** Long text folded to [FOLDED_LINES] lines with "Read more"; a short one is shown whole, with no button. */
+/** The article's blocks after its lead: subheadings, paragraphs, the quotation set apart, lists. */
 @Composable
-private fun FoldedText(text: String) {
-    var expanded by remember { mutableStateOf(false) }
-    var overflows by remember { mutableStateOf(false) }
-    Text(
-        text,
-        maxLines = if (expanded) Int.MAX_VALUE else FOLDED_LINES,
-        overflow = TextOverflow.Ellipsis,
-        onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
-        style = TextStyle(color = Text2, fontSize = 15.sp, lineHeight = 23.sp),
-    )
-    if (overflows || expanded) {
-        Text(
-            if (expanded) "Show less" else "Read more",
-            style = TextStyle(color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Medium),
-            modifier = Modifier
-                .padding(top = 8.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .clickable { expanded = !expanded }
-                .padding(vertical = 4.dp),
-        )
+private fun ArticleBody(blocks: List<ArticleBlock>) {
+    val body = TextStyle(color = TextC, fontSize = 16.sp, lineHeight = 25.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        blocks.forEach { block ->
+            when (block) {
+                is ArticleBlock.Heading -> Text(
+                    block.text,
+                    style = TextStyle(color = TextC, fontSize = 19.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
+                    modifier = Modifier.padding(top = 10.dp),
+                )
+                is ArticleBlock.Paragraph -> Text(inlineText(block.text), style = body)
+                is ArticleBlock.Quote -> Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(vertical = 6.dp)) {
+                    Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(AccentInk))
+                    Spacer(Modifier.width(14.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        block.lines.forEach { line ->
+                            if (isAttribution(line)) {
+                                Text(line, style = TextStyle(color = Text3, fontSize = 13.sp, lineHeight = 18.sp))
+                            } else {
+                                Text(
+                                    inlineText(line),
+                                    style = TextStyle(color = TextC, fontSize = 19.sp, lineHeight = 27.sp, fontStyle = FontStyle.Italic),
+                                )
+                            }
+                        }
+                    }
+                }
+                is ArticleBlock.Items -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    block.items.forEachIndexed { i, item ->
+                        Row(verticalAlignment = Alignment.Top) {
+                            if (block.numbered) {
+                                Text(
+                                    "${i + 1}.",
+                                    style = body.copy(color = AccentInk, fontWeight = FontWeight.SemiBold),
+                                    modifier = Modifier.width(24.dp),
+                                )
+                            } else {
+                                Box(Modifier.padding(top = 10.dp).size(6.dp).clip(CircleShape).background(AccentInk))
+                                Spacer(Modifier.width(12.dp))
+                            }
+                            Text(inlineText(item), style = body, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-private const val FOLDED_LINES = 6
+/** A block's words with their `**bold**` and `*italic*` set. */
+private fun inlineText(text: String): AnnotatedString = buildAnnotatedString {
+    inlineRuns(text).forEach { run ->
+        when {
+            run.bold -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(run.text) }
+            run.italic -> withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { append(run.text) }
+            else -> append(run.text)
+        }
+    }
+}
+
+/** One outlet's report of the story: the outlet, its own headline, and a tap opens it. */
+@Composable
+private fun SourceRow(report: NewsReport, onOpen: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Surface)
+            .border(1.dp, BorderC, shape)
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(report.name, style = TextStyle(color = AccentInk, fontSize = 12.sp, fontWeight = FontWeight.SemiBold))
+            if (report.title.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(report.title, style = TextStyle(color = TextC, fontSize = 15.sp, lineHeight = 21.sp))
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Text("↗", style = TextStyle(color = Text3, fontSize = 16.sp))
+    }
+}
 
 /**
  * Horizontal swipe-to-dismiss, coexisting with vertical scrolling children. [toRight] picks the

@@ -36,6 +36,9 @@ data class NewsClaim(val claim: String, val evidence: String)
 /** One number an article states: [value] as it writes it ("14%", "NOK 2.1 bn") and what it measures. */
 data class NewsFigure(val value: String, val label: String)
 
+/** One outlet's report of a story several carried (`NewsCardSource`): the outlet, its address and its own headline. */
+data class NewsReport(val name: String, val url: String, val title: String)
+
 /**
  * One card of the server's news feed (`NewsCard`); [body] is null when only the synopsis was kept.
  * [imageUrl] is a path on the server (`/uploads/system/news/<hash>.jpg`), never an outside address;
@@ -76,6 +79,13 @@ data class NewsItem(
     val read: Boolean = false,
     /** In the morning's edition (All), its group: `norway`, `world` or `research`; null in any other list. */
     val editionGroup: String? = null,
+    /**
+     * The article as the box wrote it up (`article`): Markdown with a lead paragraph, `## ` subheadings, `> `
+     * quotes, `- ` lists and `**bold**` ([articleBlocks]). Null when there is none: the page shows [synopsis] and [body].
+     */
+    val articleMarkdown: String? = null,
+    /** Every outlet's report of the story when more than one reported it, the first seen first; empty otherwise. */
+    val sources: List<NewsReport> = emptyList(),
 )
 
 /**
@@ -83,7 +93,8 @@ data class NewsItem(
  * `{"cards":[{"id","sourceName","url","title","synopsis","body","publishedAt","tags","kind",
  * "keyPoints":[str],"figures":[{"value","label"}],"imageUrl","imageGenerated","alsoIn":[str],
  * "authors":[str],"categories":[str],"arxivId","upvotes","codeUrl","codeStars",
- * "claims":[{"claim","evidence"}],"favorite","read","editionGroup"}],"refreshedAt","nextCursor","editionAt","editionSize"}`.
+ * "claims":[{"claim","evidence"}],"favorite","read","editionGroup","article","sources":[{"name","url","title"}]}],
+ * "refreshedAt","nextCursor","editionAt","editionSize"}`.
  * [NewsFeed.nextCursor] is where the next page starts, null on the last. [NewsFeed.editionAt] is set when the
  * list is the morning's edition (All), and [NewsFeed.editionSize] is how many cards it has, read ones included.
  * The same shape is what the on-device cache keeps ([toJson]), so one parser reads both.
@@ -152,7 +163,17 @@ private fun parseItem(element: JsonElement): NewsItem? {
         favorite = (o["favorite"] as? JsonPrimitive)?.booleanOrNull ?: false,
         read = (o["read"] as? JsonPrimitive)?.booleanOrNull ?: false,
         editionGroup = o.text("editionGroup")?.trim()?.takeIf { it.isNotEmpty() },
+        articleMarkdown = o.text("article")?.takeIf { it.isNotBlank() },
+        sources = (o["sources"] as? JsonArray).orEmpty().mapNotNull { parseReport(it) },
     )
+}
+
+/** A report needs an outlet and an address to open; a missing headline is empty. */
+private fun parseReport(element: JsonElement): NewsReport? {
+    val o = element as? JsonObject ?: return null
+    val url = o.text("url")?.trim()?.takeIf { it.startsWith("http") } ?: return null
+    val name = o.text("name")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return NewsReport(name, url, o.text("title")?.trim().orEmpty())
 }
 
 private fun JsonObject.strings(key: String): List<String> = (this[key] as? JsonArray).orEmpty()
@@ -207,6 +228,16 @@ fun NewsFeed.toJson(): String = buildJsonObject {
                 put("favorite", item.favorite)
                 put("read", item.read)
                 put("editionGroup", item.editionGroup)
+                put("article", item.articleMarkdown)
+                putJsonArray("sources") {
+                    item.sources.forEach { report ->
+                        addJsonObject {
+                            put("name", report.name)
+                            put("url", report.url)
+                            put("title", report.title)
+                        }
+                    }
+                }
                 putJsonArray("claims") {
                     item.claims.forEach { claim ->
                         addJsonObject {

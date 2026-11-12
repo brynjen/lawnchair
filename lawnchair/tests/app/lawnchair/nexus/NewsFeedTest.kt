@@ -4,6 +4,7 @@ import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.news.NewsKind
+import app.lawnchair.nexus.news.NewsReport
 import app.lawnchair.nexus.news.agoText
 import app.lawnchair.nexus.news.parseNewsFeed
 import app.lawnchair.nexus.news.toJson
@@ -270,5 +271,36 @@ class NewsFeedTest {
         assertEquals(null, plain.editionAt)
         assertEquals(0, plain.editionSize)
         assertEquals(null, plain.items.single().editionGroup)
+    }
+
+    @Test
+    fun `an article and a story's sources are read, and kept by the cache`() {
+        val feed = parseNewsFeed(
+            """
+            {"cards":[{"id":9,"sourceName":"NRK","url":"https://nrk.no/a","title":"Diplomater forlater Vietnam","synopsis":"Kort.",
+              "article":"Ingressen.\n\n## Bakgrunn\n\nMer.",
+              "sources":[{"name":"NRK","url":"https://nrk.no/a","title":"Diplomater forlater Vietnam"},
+                         {"name":"VG","url":"https://vg.no/b","title":"UD henter hjem ansatte"},
+                         {"name":"","url":"https://x.test/c","title":"No outlet"},
+                         {"name":"Bad","url":"javascript:alert(1)","title":"No address"}]}]}
+            """.trimIndent(),
+        )!!
+        val item = feed.items.single()
+        assertEquals("Ingressen.\n\n## Bakgrunn\n\nMer.", item.articleMarkdown)
+        assertEquals(
+            listOf(
+                NewsReport("NRK", "https://nrk.no/a", "Diplomater forlater Vietnam"),
+                NewsReport("VG", "https://vg.no/b", "UD henter hjem ansatte"),
+            ),
+            item.sources,
+        )
+        assertEquals(feed, parseNewsFeed(feed.toJson()))
+    }
+
+    @Test
+    fun `a card from before articles has none, and no sources`() {
+        val item = parseNewsFeed(full)!!.items[0]
+        assertNull(item.articleMarkdown)
+        assertEquals(emptyList<NewsReport>(), item.sources)
     }
 }
