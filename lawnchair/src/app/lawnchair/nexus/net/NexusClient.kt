@@ -96,6 +96,13 @@ class NexusClient(
             post(base, "/push", token, JSONObject().put("method", "subscription")),
         )
 
+    /**
+     * `POST /power {"method":"record", …}` → the recording's id. [recording] is the call's arguments as
+     * `powerRecordingJson` makes them.
+     */
+    suspend fun powerRecord(base: String, token: String, recording: JSONObject): Int =
+        post(base, "/power", token, JSONObject(recording.toString()).put("method", "record")).trim().toInt()
+
     /** `POST /banner {"method":"state"}` → the banner: `{"version","headline","lines","actions","notice"}`. */
     suspend fun bannerState(base: String, token: String): app.lawnchair.nexus.BannerState =
         app.lawnchair.nexus.parseBannerState(post(base, "/banner", token, JSONObject().put("method", "state")))

@@ -65,7 +65,7 @@ import okhttp3.WebSocketListener
 class NexusPushService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val stats = PushStats()
+    private val stats = PushStats.process
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)

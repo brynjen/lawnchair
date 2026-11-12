@@ -97,6 +97,14 @@ private val RETRY_SECONDS = intArrayOf(5, 10, 15, 30, 60, 120)
  * with `adb shell dumpsys activity service NexusPushService`.
  */
 class PushStats(private val now: () -> Long = System::currentTimeMillis) {
+    companion object {
+        /**
+         * The launcher process's own, which the push service counts into however often it is
+         * started again: a power recording reads it at both ends and takes the difference.
+         */
+        val process = PushStats()
+    }
+
     private val startedAt = now()
     private var connectedAt = 0L
     private var connectedMs = 0L
@@ -138,6 +146,10 @@ class PushStats(private val now: () -> Long = System::currentTimeMillis) {
         failures++
         lastFailure = reason
     }
+
+    /** How long the connection has stood in all, in seconds. */
+    @Synchronized
+    fun connectedSeconds(): Long = (connectedMs + if (connectedAt > 0) now() - connectedAt else 0) / 1000
 
     @Synchronized
     fun lines(): List<String> {
