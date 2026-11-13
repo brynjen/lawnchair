@@ -77,7 +77,9 @@ sealed class LawnchairSearchAlgorithm(
     protected fun transformSearchResults(results: List<SearchTargetCompat>): List<SearchAdapterItem> {
         val filtered = results
             .asSequence()
-            .filter { it.packageName != BuildConfig.APPLICATION_ID }
+            // Nexus: the Nexus app is this APK's own drawer entry (NexusAppActivity), so an app
+            // of our own package (and its shortcuts) is a result like any other.
+            .filter { it.packageName != BuildConfig.APPLICATION_ID || it.isApp || it.isShortcut }
             .filter { LawnchairSearchAdapterProvider.viewTypeMap[it.layoutType] != null }
             .removeDuplicateDividers()
             .toList()
