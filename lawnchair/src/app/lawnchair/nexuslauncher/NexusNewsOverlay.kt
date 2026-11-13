@@ -9,6 +9,7 @@ import androidx.core.view.WindowCompat
 import app.lawnchair.LawnchairLauncher
 import app.lawnchair.nexus.chat.NexusChatOverlay
 import app.lawnchair.nexus.net.ChatSubject
+import app.lawnchair.nexus.news.NewsItem
 import com.android.launcher3.InsettableFrameLayout
 import com.android.systemui.plugins.shared.LauncherOverlayManager
 import com.android.systemui.plugins.shared.LauncherOverlayManager.LauncherOverlay
@@ -34,6 +35,10 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
     // off to the left, so everything that costs battery in it (the server calls, the orb's render
     // thread) is told to run only while this is true.
     private val open = mutableStateOf(false)
+
+    // An article to show open, asked for from outside the page (the launcher's search field), until
+    // the page has taken it.
+    private val requested = mutableStateOf<NewsItem?>(null)
     private var flingVelocity = 0f
     private var settleAnim: ValueAnimator? = null
 
@@ -73,6 +78,8 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
             setContent {
                 NexusNewsScreen(
                     open = open.value,
+                    requested = requested.value,
+                    onRequestTaken = { requested.value = null },
                     onClose = { animateTo(0f) },
                     onDark = {
                         panelDark = it
@@ -165,6 +172,13 @@ class NexusNewsOverlay(private val launcher: LawnchairLauncher) :
     }
 
     override fun openOverlay() = animateTo(1f)
+
+    /** Opens the page at [article] (found in the launcher's search field); back goes to the list. */
+    fun openArticle(article: NewsItem) {
+        requested.value = article
+        attachOverlay()
+        animateTo(1f)
+    }
 
     override fun hideOverlay(animate: Boolean) = hideOverlay(if (animate) 200 else 0)
 

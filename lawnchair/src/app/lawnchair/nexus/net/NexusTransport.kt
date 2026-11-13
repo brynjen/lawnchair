@@ -2,6 +2,7 @@ package app.lawnchair.nexus.net
 
 import app.lawnchair.nexus.box.SubstrateFrame
 import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.search.NexusSearchHits
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -136,6 +137,13 @@ interface NexusTransport {
      * "read":b}`) and answers whether it is marked now, like [newsFavorite].
      */
     suspend fun newsRead(base: String, token: String, id: Long, read: Boolean): Boolean
+
+    /**
+     * What the launcher's search field finds for [query] in this person's notes, chats and the News
+     * (`POST /quickSearch {"method":"search","query":q,"limit":n}`): up to [limit] of each, found by
+     * their words. Nothing for fewer than two letters.
+     */
+    suspend fun quickSearch(base: String, token: String, query: String, limit: Int): NexusSearchHits
 }
 
 /**

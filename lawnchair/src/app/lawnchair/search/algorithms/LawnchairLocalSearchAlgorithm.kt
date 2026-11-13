@@ -1,6 +1,8 @@
 package app.lawnchair.search.algorithms
 
 import android.content.Context
+import app.lawnchair.nexus.search.NexusRowAdapterItem
+import app.lawnchair.nexus.search.nexusSearchRow
 import app.lawnchair.preferences.PreferenceManager
 import app.lawnchair.preferences2.PreferenceManager2
 import app.lawnchair.preferences2.firstCached
@@ -84,7 +86,11 @@ class LawnchairLocalSearchAlgorithm(context: Context) : LawnchairSearchAlgorithm
                     resultsArray.toList().flatten()
                 }
 
-                nonAppProvidersFlow.collect { nonAppResults ->
+                // Nexus: the row of the person's notes, chats and News above everything else. Its
+                // first value (the Ask card, with ghosts) comes at once, so the list starts with it.
+                val nexusRowFlow = nexusSearchRow(context, query)
+
+                combine(nonAppProvidersFlow, nexusRowFlow, ::Pair).collect { (nonAppResults, nexusRow) ->
                     val calcResult = CalculatorSearchProvider.search(context, query)
                         .firstOrNull()
 
@@ -93,8 +99,9 @@ class LawnchairLocalSearchAlgorithm(context: Context) : LawnchairSearchAlgorithm
                     val searchTargets = translateToSearchTargets(allResults)
                     setFirstItemQuickLaunch(searchTargets)
                     val adapterItems = transformSearchResults(searchTargets)
+                    val items = listOfNotNull(nexusRow?.let(::NexusRowAdapterItem)) + adapterItems
                     withContext(Dispatchers.Main) {
-                        callback.onSearchResult(query, ArrayList(adapterItems))
+                        callback.onSearchResult(query, ArrayList(items))
                     }
                 }
             }

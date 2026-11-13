@@ -39,6 +39,7 @@ import app.lawnchair.gestures.GestureController
 import app.lawnchair.gestures.VerticalSwipeTouchController
 import app.lawnchair.gestures.config.GestureHandlerConfig
 import app.lawnchair.gestures.ui.LawnchairShortcutActivity
+import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.voice.MicPermission
 import app.lawnchair.nexuslauncher.NexusNewsOverlay
 import app.lawnchair.preferences.PreferenceManager
@@ -517,6 +518,12 @@ class LawnchairLauncher : QuickstepLauncher() {
     }
 
     override fun getDefaultOverlay(): LauncherOverlayManager = defaultOverlay
+
+    /** Leaves the app drawer for the home screen and opens the News page at [article]. */
+    fun openNewsArticle(article: NewsItem) {
+        stateManager.goToState(LauncherState.NORMAL, false)
+        defaultOverlay.openArticle(article)
+    }
 
     // Nexus voice: RECORD_AUDIO runtime request. The launcher has no registerForActivityResult
     // plumbing, so use the classic requestPermissions + onRequestPermissionsResult pair.

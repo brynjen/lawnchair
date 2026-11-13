@@ -2,6 +2,7 @@ package app.lawnchair.nexus
 
 import app.lawnchair.nexus.box.SubstrateFrame
 import app.lawnchair.nexus.news.NewsFeed
+import app.lawnchair.nexus.search.NexusSearchHits
 import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.net.NexusTurnEvent
@@ -63,6 +64,8 @@ open class StubNexusTransport : NexusTransport {
     override suspend fun newsFavorite(base: String, token: String, id: Long, favorite: Boolean): Boolean = unused()
 
     override suspend fun newsRead(base: String, token: String, id: Long, read: Boolean): Boolean = unused()
+
+    override suspend fun quickSearch(base: String, token: String, query: String, limit: Int): NexusSearchHits = unused()
 
     private fun unused(): Nothing = error("not used by this test")
 }

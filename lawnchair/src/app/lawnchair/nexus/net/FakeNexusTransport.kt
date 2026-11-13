@@ -15,6 +15,9 @@ import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.NewsFigure
 import app.lawnchair.nexus.news.NewsItem
 import app.lawnchair.nexus.news.NewsKind
+import app.lawnchair.nexus.search.NexusChatHit
+import app.lawnchair.nexus.search.NexusNoteHit
+import app.lawnchair.nexus.search.NexusSearchHits
 import java.time.Instant
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -255,6 +258,16 @@ class FakeNexusTransport(
     override suspend fun newsRead(base: String, token: String, id: Long, read: Boolean): Boolean {
         delay(100)
         return read
+    }
+
+    /** One canned note and one chat that say [query], after a moment, so the row's ghosts show first. */
+    override suspend fun quickSearch(base: String, token: String, query: String, limit: Int): NexusSearchHits {
+        delay(300)
+        return NexusSearchHits(
+            notes = listOf(NexusNoteHit("Mock/$query.md", query, "A mock note that mentions $query.", null)),
+            chats = listOf(NexusChatHit(1, "Talking about $query", "Mock: what about $query?", null, null)),
+            news = emptyList(),
+        )
     }
 
     /** A gradient JPEG standing in for the server's picture, so a mock card has one to show. */

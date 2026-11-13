@@ -121,7 +121,7 @@ fun parseNewsFeed(text: String): NewsFeed? {
     val feed = runCatching { Json.parseToJsonElement(text) }.getOrNull() as? JsonObject ?: return null
     val cards = feed["cards"] as? JsonArray ?: return null
     return NewsFeed(
-        items = cards.mapNotNull { parseItem(it) }.distinctBy { it.id },
+        items = cards.mapNotNull { parseNewsItem(it) }.distinctBy { it.id },
         refreshedAt = parseInstant(feed.text("refreshedAt")),
         nextCursor = feed.text("nextCursor")?.takeIf { it.isNotBlank() },
         editionAt = parseInstant(feed.text("editionAt")),
@@ -129,7 +129,8 @@ fun parseNewsFeed(text: String): NewsFeed? {
     )
 }
 
-private fun parseItem(element: JsonElement): NewsItem? {
+/** One `NewsCard` of the server's JSON, or null for a card with no id or no title (see [parseNewsFeed]). */
+internal fun parseNewsItem(element: JsonElement): NewsItem? {
     val o = element as? JsonObject ?: return null
     val id = (o["id"] as? JsonPrimitive)?.longOrNull ?: return null
     val title = o.text("title")?.trim()?.takeIf { it.isNotEmpty() } ?: return null

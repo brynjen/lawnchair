@@ -5,6 +5,8 @@ import app.lawnchair.nexus.box.parseSubstrateLanes
 import app.lawnchair.nexus.news.NewsFeed
 import app.lawnchair.nexus.news.parseNewsFeed
 import app.lawnchair.nexus.news.resolveNewsImageUrl
+import app.lawnchair.nexus.search.NexusSearchHits
+import app.lawnchair.nexus.search.parseQuickSearch
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -201,6 +203,13 @@ class NexusClient(
         val request = JSONObject().put("method", "setRead").put("id", id).put("read", read)
         return post(base, "/news", token, request).trim().toBooleanStrictOrNull()
             ?: throw java.io.IOException("Unreadable answer to setRead")
+    }
+
+    /** `POST /quickSearch {"method":"search","query":q,"limit":n}` → the server's `QuickSearchResult`. */
+    override suspend fun quickSearch(base: String, token: String, query: String, limit: Int): NexusSearchHits {
+        val request = JSONObject().put("method", "search").put("query", query).put("limit", limit)
+        return parseQuickSearch(post(base, "/quickSearch", token, request))
+            ?: throw java.io.IOException("Unreadable quick search")
     }
 
     private fun readNews(body: String): NewsFeed =

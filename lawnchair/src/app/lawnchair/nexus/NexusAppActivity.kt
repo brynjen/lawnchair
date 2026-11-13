@@ -7,6 +7,7 @@ import app.lawnchair.nexus.buds.NexusBudsTrigger
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.net.URLEncoder
 
 /**
  * The Nexus app — nexus_mobile, embedded as a Flutter AAR (`melos app:aar` in nexus). This is the
@@ -18,7 +19,8 @@ import io.flutter.plugin.common.MethodChannel
  *
  * The launcher's search bar opens it at Home ([homeIntent]): a cold start begins there anyway, and an
  * app that is already running, on the map or in settings, is told to go there (the singleTop
- * [onNewIntent]).
+ * [onNewIntent]). A chat found in the launcher's search field opens at that chat ([chatIntent]): a
+ * cold start begins at its route (Flutter's `route` extra), and a running app is told to open it.
  */
 class NexusAppActivity : FlutterFragmentActivity() {
     private var launcherLine: MethodChannel? = null
@@ -52,7 +54,10 @@ class NexusAppActivity : FlutterFragmentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // Before the app has put its listener up there is nothing to take it to: it starts at Home.
-        if (intent.getStringExtra(EXTRA_START) == START_HOME) launcherLine?.invokeMethod("home", null)
+        when (intent.getStringExtra(EXTRA_START)) {
+            START_HOME -> launcherLine?.invokeMethod("home", null)
+            START_ROUTE -> intent.getStringExtra(EXTRA_ROUTE)?.let { launcherLine?.invokeMethod("open", it) }
+        }
     }
 
     override fun onResume() {
@@ -80,5 +85,25 @@ class NexusAppActivity : FlutterFragmentActivity() {
         fun homeIntent(context: Context): Intent = Intent(context, NexusAppActivity::class.java)
             .putExtra(EXTRA_START, START_HOME)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+        const val START_ROUTE = "route"
+
+        /** Flutter's own extra: the route a cold start begins at (FlutterActivityLaunchConfigs). */
+        private const val EXTRA_ROUTE = "route"
+
+        /**
+         * Opens the app at chat [conversationId] (over its Home, so back lands there), headed [title];
+         * [agentId] is the agent of a direct session.
+         */
+        fun chatIntent(context: Context, conversationId: Int, title: String, agentId: String?): Intent =
+            Intent(context, NexusAppActivity::class.java)
+                .putExtra(EXTRA_START, START_ROUTE)
+                .putExtra(EXTRA_ROUTE, chatRoute(conversationId, title, agentId))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 }
+
+/** The app's route to a chat: `/chat?c=<id>&title=<title>[&agent=<id>]` (nexus_mobile's app.dart). */
+fun chatRoute(conversationId: Int, title: String, agentId: String?): String =
+    "/chat?c=$conversationId&title=${URLEncoder.encode(title, Charsets.UTF_8)}" +
+        (agentId?.let { "&agent=${URLEncoder.encode(it, Charsets.UTF_8)}" } ?: "")

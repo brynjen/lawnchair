@@ -194,6 +194,8 @@ private fun systemDark(context: android.content.Context): Boolean =
 fun NexusNewsScreen(
     open: Boolean,
     onClose: () -> Unit,
+    requested: NewsItem? = null,
+    onRequestTaken: () -> Unit = {},
     onDark: (Boolean) -> Unit = {},
     onDiscuss: (NewsItem) -> Unit = {},
     onAsk: (NewsItem, String) -> Unit = { _, _ -> },
@@ -243,7 +245,9 @@ fun NexusNewsScreen(
                 } else {
                     // Everything the page holds (the feed, the search, the open article) is one person's
                     // on one server: signing out or in as someone else starts it over.
-                    key(gate.serverUrl, gate.authKey) { NewsPanel(open, gate.serverUrl, gate.authKey, onClose, onDiscuss, onAsk) }
+                    key(gate.serverUrl, gate.authKey) {
+                        NewsPanel(open, gate.serverUrl, gate.authKey, onClose, onDiscuss, onAsk, requested, onRequestTaken)
+                    }
                 }
             }
         }
@@ -258,6 +262,8 @@ private fun NewsPanel(
     onClose: () -> Unit,
     onDiscuss: (NewsItem) -> Unit,
     onAsk: (NewsItem, String) -> Unit,
+    requested: NewsItem?,
+    onRequestTaken: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
     var section by remember { mutableStateOf(NewsSection.Now) }
@@ -324,6 +330,13 @@ private fun NewsPanel(
         }
         delay(SEARCH_DEBOUNCE_MS)
         news.search(section.wire, words)?.let { found = words to it }
+    }
+
+    // An article asked for from outside (the launcher's search field) opens over whatever list is shown.
+    LaunchedEffect(requested) {
+        if (requested == null) return@LaunchedEffect
+        selected = requested
+        onRequestTaken()
     }
 
     // A star or a Read mark shows at once and the server is told; if it could not be reached the mark

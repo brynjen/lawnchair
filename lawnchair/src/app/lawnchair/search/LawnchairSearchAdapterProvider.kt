@@ -7,6 +7,10 @@ import android.view.ViewGroup
 import androidx.core.util.contains
 import app.lawnchair.allapps.views.SearchItemDecorator
 import app.lawnchair.allapps.views.SearchResultView
+import app.lawnchair.launcher
+import app.lawnchair.nexus.search.NexusRowAdapterItem
+import app.lawnchair.nexus.search.NexusSearchOpener
+import app.lawnchair.nexus.search.NexusSearchRowView
 import app.lawnchair.search.adapter.SearchAdapterItem
 import com.android.app.search.LayoutType
 import com.android.launcher3.DeviceProfile
@@ -49,10 +53,16 @@ class LawnchairSearchAdapterProvider(
             appsView.mSearchRecyclerView.invalidate()
         }
 
-    override fun isViewSupported(viewType: Int): Boolean = layoutIdMap.contains(viewType)
+    override fun isViewSupported(viewType: Int): Boolean =
+        layoutIdMap.contains(viewType) || viewType == NexusRowAdapterItem.VIEW_TYPE
 
     override fun onBindView(holder: BaseAllAppsAdapter.ViewHolder, position: Int) {
-        val adapterItem = appsView.mSearchRecyclerView.mApps.adapterItems[position] as SearchAdapterItem
+        val item = appsView.mSearchRecyclerView.mApps.adapterItems[position]
+        if (item is NexusRowAdapterItem) {
+            (holder.itemView as NexusSearchRowView).bind(item.row)
+            return
+        }
+        val adapterItem = item as SearchAdapterItem
         adapterItem.setRippleEffect(holder.itemView)
         val itemView = holder.itemView as SearchResultView
         itemView.bind(
@@ -69,6 +79,9 @@ class LawnchairSearchAdapterProvider(
         parent: ViewGroup?,
         viewType: Int,
     ): BaseAllAppsAdapter.ViewHolder {
+        if (viewType == NexusRowAdapterItem.VIEW_TYPE) {
+            return BaseAllAppsAdapter.ViewHolder(NexusSearchRowView(layoutInflater.context, NexusSearchOpener(appsView.context.launcher)))
+        }
         val view = layoutInflater.inflate(layoutIdMap[viewType], parent, false)
         val grid: DeviceProfile = mLauncher.deviceProfile
         val leftMargin = grid.allAppsPadding.left
