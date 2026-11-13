@@ -630,6 +630,10 @@ licensee {
         'com.linusu.flutter_web_auth_2',
         'dev.fluttercommunity.plus.share',
         'io.flutter.plugins.googlesignin',
+        // The lead's icon from the phone's pictures (image_picker, BSD-3-Clause) and the
+        // lifecycle shim it brings.
+        'io.flutter.plugins.imagepicker',
+        'io.flutter.plugins.flutter_plugin_android_lifecycle',
     ].each { group ->
         ignoreDependencies(group) { because 'Flutter add-to-app AAR without POM license metadata' }
     }
