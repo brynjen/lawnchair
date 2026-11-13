@@ -80,6 +80,9 @@ sealed class LawnchairSearchAlgorithm(
             // Nexus: the Nexus app is this APK's own drawer entry (NexusAppActivity), so an app
             // of our own package (and its shortcuts) is a result like any other.
             .filter { it.packageName != BuildConfig.APPLICATION_ID || it.isApp || it.isShortcut }
+            // Nexus: LeakCanary's "Leaks" shortcut on the app (debug builds) stays on the icon's
+            // long-press, but is no search result.
+            .filter { it.shortcutInfo?.id != LEAK_CANARY_SHORTCUT_ID }
             .filter { LawnchairSearchAdapterProvider.viewTypeMap[it.layoutType] != null }
             .removeDuplicateDividers()
             .toList()
@@ -263,6 +266,9 @@ private fun Sequence<SearchTargetCompat>.removeDuplicateDividers(): Sequence<Sea
         !remove
     }
 }
+
+/** The dynamic shortcut LeakCanary (debug builds) puts on the app's icon. */
+private const val LEAK_CANARY_SHORTCUT_ID = "com.squareup.leakcanary.dynamic_shortcut"
 
 private val SearchTargetCompat.isApp get() = resultType == RESULT_TYPE_APPLICATION
 private val SearchTargetCompat.isShortcut get() = resultType == RESULT_TYPE_SHORTCUT
