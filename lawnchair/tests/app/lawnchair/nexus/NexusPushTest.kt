@@ -37,6 +37,7 @@ class NexusPushTest {
     fun `what a push says is read the same whatever carried it`() {
         assertEquals(NexusPush.Notification("Nexus", "Hei på deg"), decodeNexusPush("Nexus", "Hei på deg"))
         assertEquals(NexusPush.Nudge(listOf(12)), decodeNexusPush("", """{"nexus":"banner","v":"0123456789ab","jobs":[12]}"""))
+        assertEquals(NexusPush.CoderQuestions, decodeNexusPush("", """{"nexus":"coder","v":"0123456789ab"}"""))
     }
 
     @Test

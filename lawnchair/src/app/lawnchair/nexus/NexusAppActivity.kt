@@ -91,6 +91,13 @@ class NexusAppActivity : FlutterFragmentActivity() {
         /** Flutter's own extra: the route a cold start begins at (FlutterActivityLaunchConfigs). */
         private const val EXTRA_ROUTE = "route"
 
+        /** Opens the app at [route] of nexus_mobile's router, over its Home so back lands there. */
+        fun routeIntent(context: Context, route: String): Intent =
+            Intent(context, NexusAppActivity::class.java)
+                .putExtra(EXTRA_START, START_ROUTE)
+                .putExtra(EXTRA_ROUTE, route)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
         /**
          * Opens the app at chat [conversationId] (over its Home, so back lands there), headed [title];
          * [agentId] is the agent of a direct session.

@@ -18,6 +18,12 @@ sealed interface NexusPush {
      */
     data class Nudge(val jobs: List<Int>) : NexusPush
 
+    /**
+     * The server's word that the questions this person's coding agents wait on changed: never
+     * shown. The phone asks for them over the sealed coder route ([app.lawnchair.nexus.coder]).
+     */
+    data object CoderQuestions : NexusPush
+
     /** A word of Nexus's own that this build does not know: not a notification either. */
     data object Other : NexusPush
 }
@@ -29,6 +35,7 @@ fun decodeNexusPush(title: String, body: String): NexusPush {
             val jobs = word.optJSONArray("jobs")
             NexusPush.Nudge(List(jobs?.length() ?: 0) { jobs!!.optInt(it) })
         }
+        word?.optString("nexus") == "coder" -> NexusPush.CoderQuestions
         word?.has("nexus") == true -> NexusPush.Other
         else -> NexusPush.Notification(title, body)
     }
