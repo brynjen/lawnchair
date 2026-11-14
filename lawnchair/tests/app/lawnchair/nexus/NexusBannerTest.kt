@@ -1,7 +1,7 @@
 package app.lawnchair.nexus
 
-import app.lawnchair.nexus.push.PushEvent
-import app.lawnchair.nexus.push.parsePushEvent
+import app.lawnchair.nexus.push.NexusPush
+import app.lawnchair.nexus.push.decodeNexusPush
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -104,13 +104,9 @@ class NexusBannerTest {
 
     @Test
     fun `the server's nudge is not a notification`() {
-        val nudge = """{"id":"abc","event":"message","message":"{\"nexus\":\"banner\",\"v\":\"0123456789ab\",\"jobs\":[12]}"}"""
-        assertEquals(PushEvent.Nudge("abc", listOf(12)), parsePushEvent(nudge))
-        val plain = """{"id":"abd","event":"message","message":"{\"nexus\":\"banner\",\"v\":\"0123456789ab\"}"}"""
-        assertEquals(PushEvent.Nudge("abd", emptyList()), parsePushEvent(plain))
-        val unknown = """{"id":"abe","event":"message","message":"{\"nexus\":\"later\"}"}"""
-        assertEquals(PushEvent.Other, parsePushEvent(unknown))
-        val words = """{"id":"abf","event":"message","title":"Hi","message":"{not ours}"}"""
-        assertEquals(PushEvent.Message("abf", "Hi", "{not ours}"), parsePushEvent(words))
+        assertEquals(NexusPush.Nudge(listOf(12)), decodeNexusPush("", """{"nexus":"banner","v":"0123456789ab","jobs":[12]}"""))
+        assertEquals(NexusPush.Nudge(emptyList()), decodeNexusPush("", """{"nexus":"banner","v":"0123456789ab"}"""))
+        assertEquals(NexusPush.Other, decodeNexusPush("", """{"nexus":"later"}"""))
+        assertEquals(NexusPush.Notification("Hi", "{not ours}"), decodeNexusPush("Hi", "{not ours}"))
     }
 }

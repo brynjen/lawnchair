@@ -3,87 +3,62 @@ package app.lawnchair.nexus.push
 import org.json.JSONObject
 
 /**
- * What the push socket says, in ntfy's own wire format (one JSON object a frame): the server's
- * `open` when the subscription stands, a `keepalive` every keepalive interval, and a `message` for
- * each notification. Anything else is [Other] and ignored.
+ * What a push says once its transport has handed it over: Nexus's own, whatever carried it
+ * (docs/features/push.md in nexus, "The contract"). The ntfy socket ([NexusPushService], `Ntfy.kt`)
+ * hands over a message's title and text; another transport (an FCM data message) would hand over
+ * the same body to [decodeNexusPush].
  */
-sealed interface PushEvent {
-    data object Open : PushEvent
-    data object Keepalive : PushEvent
-
-    /** A notification: [id] is ntfy's, and what the next connection asks for everything since. */
-    data class Message(val id: String, val title: String, val text: String) : PushEvent
+sealed interface NexusPush {
+    /** A notification to show: today only the admin page's test tab sends one. */
+    data class Notification(val title: String, val text: String) : NexusPush
 
     /**
      * The server's word that the banner changed: never shown. [jobs] are the jobs that left the card,
-     * whose end may be a notification for this person. [id] is ntfy's, kept like a message's.
+     * whose end may be a notification for this person.
      */
-    data class Nudge(val id: String, val jobs: List<Int>) : PushEvent
+    data class Nudge(val jobs: List<Int>) : NexusPush
 
-    data object Other : PushEvent
+    /** A word of Nexus's own that this build does not know: not a notification either. */
+    data object Other : NexusPush
 }
 
-fun parsePushEvent(frame: String): PushEvent {
-    val json = runCatching { JSONObject(frame) }.getOrNull() ?: return PushEvent.Other
-    return when (json.optString("event")) {
-        "open" -> PushEvent.Open
-        "keepalive" -> PushEvent.Keepalive
-        "message" -> {
-            val id = json.optString("id")
-            val text = json.optString("message")
-            val nudge = if (text.startsWith("{")) runCatching { JSONObject(text) }.getOrNull() else null
-            when {
-                id.isEmpty() -> PushEvent.Other
-                nudge?.optString("nexus") == "banner" -> {
-                    val jobs = nudge.optJSONArray("jobs")
-                    PushEvent.Nudge(id, List(jobs?.length() ?: 0) { jobs!!.optInt(it) })
-                }
-                // A word of Nexus's own that this build does not know is not a notification either.
-                nudge?.has("nexus") == true -> PushEvent.Other
-                else -> PushEvent.Message(id = id, title = json.optString("title"), text = text)
-            }
+fun decodeNexusPush(title: String, body: String): NexusPush {
+    val word = if (body.startsWith("{")) runCatching { JSONObject(body) }.getOrNull() else null
+    return when {
+        word?.optString("nexus") == "banner" -> {
+            val jobs = word.optJSONArray("jobs")
+            NexusPush.Nudge(List(jobs?.length() ?: 0) { jobs!!.optInt(it) })
         }
-        else -> PushEvent.Other
+        word?.has("nexus") == true -> NexusPush.Other
+        else -> NexusPush.Notification(title, body)
     }
 }
 
 /**
- * Where to listen and on what beat: the server's answer to `push.subscription`. [keepaliveSeconds]
- * is the ntfy server's own keepalive interval; this end pings on the same one, so the two land
- * together and the radio is woken once.
+ * Where to listen and on what beat: the server's answer to `push.subscription`. [transport] says how
+ * [url] is read ([NTFY_TRANSPORT]: a topic's whole address, held as a WebSocket); a transport this
+ * build does not know is not listened to. [keepaliveSeconds] is the ntfy server's own keepalive
+ * interval; this end pings on the same one, so the two land together and the radio is woken once.
  */
-data class PushSubscription(val url: String, val keepaliveSeconds: Int)
+data class PushSubscription(val transport: String, val url: String, val keepaliveSeconds: Int)
 
-/** The server's answer as it comes (`{"url":…,"keepaliveSeconds":…}` or `null`); null when there is none. */
+/**
+ * The server's answer as it comes (`{"transport":…,"url":…,"keepaliveSeconds":…}` or `null`); null
+ * when there is none. A server from before 2026-11-14 names no transport, and had only ntfy.
+ */
 fun parsePushSubscription(body: String): PushSubscription? {
     val json = runCatching { JSONObject(body.trim()) }.getOrNull() ?: return null
     val url = json.optString("url")
     if (url.isEmpty()) return null
-    return PushSubscription(url, json.optInt("keepaliveSeconds", DEFAULT_KEEPALIVE_SECONDS).coerceIn(30, 3600))
+    return PushSubscription(
+        transport = json.optString("transport").ifEmpty { NTFY_TRANSPORT },
+        url = url,
+        keepaliveSeconds = json.optInt("keepaliveSeconds", DEFAULT_KEEPALIVE_SECONDS).coerceIn(30, 3600),
+    )
 }
 
 /** Under the 100 seconds after which Cloudflare closes a quiet WebSocket. */
 const val DEFAULT_KEEPALIVE_SECONDS = 90
-
-/**
- * The WebSocket address of a topic: `http://host/topic` is `ws://host/topic/ws`, `https` is `wss`.
- * With [since] (the last message's id) the server first sends what came while nobody listened, so a
- * dropped connection loses nothing ntfy still holds. Null for an address that is not one topic's.
- */
-fun pushSocketUrl(topicUrl: String, since: String?): String? {
-    val trimmed = topicUrl.trim().trimEnd('/')
-    val scheme = when {
-        trimmed.startsWith("https://") -> "wss"
-        trimmed.startsWith("http://") -> "ws"
-        else -> return null
-    }
-    val rest = trimmed.substringAfter("://")
-    val host = rest.substringBefore('/')
-    val topic = rest.substringAfter('/', "")
-    if (host.isEmpty() || topic.isEmpty() || topic.contains('/') || topic.contains('?')) return null
-    val query = if (since.isNullOrEmpty()) "" else "?since=$since"
-    return "$scheme://$host/$topic/ws$query"
-}
 
 /** How long to wait before connection attempt number [failures] + 1: quick at first, then every two minutes. */
 fun pushRetrySeconds(failures: Int): Int = RETRY_SECONDS[(failures - 1).coerceIn(0, RETRY_SECONDS.lastIndex)]

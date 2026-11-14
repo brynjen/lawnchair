@@ -44,7 +44,10 @@ import okhttp3.WebSocketListener
 /**
  * Nexus's own push connection: one WebSocket from the launcher to the ntfy topic the server names,
  * held for as long as a person is signed in, and a notification for each message that arrives on it.
- * No Google service and no second app: the launcher is the process that is always there.
+ * No Google service and no second app: the launcher is the process that is always there. It is the
+ * ntfy transport's end on the phone: it reads ntfy's frames (`Ntfy.kt`) and hands each message's
+ * title and text to [decodeNexusPush], which another transport would call with the same body
+ * (docs/features/push.md in nexus, "The contract").
  *
  * It stands behind Nexus's one banner ([NexusBanner]), where its line says since when it has listened
  * and how much has come. It is a foreground service because that is what lets a socket live through Doze: the system cuts
@@ -128,6 +131,12 @@ class NexusPushService : Service() {
                 stopSelf()
                 return
             }
+            if (subscription.transport != NTFY_TRANSPORT) {
+                // A transport this build does not know: its address is not a ntfy topic's.
+                Log.w(TAG, "push_unknown_transport ${subscription.transport}")
+                stopSelf()
+                return
+            }
             val url = pushSocketUrl(subscription.url, prefs.getString(KEY_LAST_ID, null))
             if (url == null) {
                 Log.w(TAG, "push_bad_address")
@@ -154,6 +163,7 @@ class NexusPushService : Service() {
                 if (answer == null) {
                     remove(KEY_ADDRESS)
                 } else {
+                    putString(KEY_TRANSPORT, answer.transport)
                     putString(KEY_ADDRESS, answer.url)
                     putInt(KEY_KEEPALIVE, answer.keepaliveSeconds)
                 }
@@ -161,7 +171,11 @@ class NexusPushService : Service() {
             return answer
         }
         val kept = prefs.getString(KEY_ADDRESS, null) ?: return null
-        return PushSubscription(kept, prefs.getInt(KEY_KEEPALIVE, DEFAULT_KEEPALIVE_SECONDS))
+        return PushSubscription(
+            prefs.getString(KEY_TRANSPORT, null) ?: NTFY_TRANSPORT,
+            kept,
+            prefs.getInt(KEY_KEEPALIVE, DEFAULT_KEEPALIVE_SECONDS),
+        )
     }
 
     /**
@@ -176,26 +190,27 @@ class NexusPushService : Service() {
             Request.Builder().url(url).build(),
             object : WebSocketListener() {
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    when (val event = parsePushEvent(text)) {
-                        PushEvent.Open -> {
+                    when (val frame = parseNtfyFrame(text)) {
+                        NtfyFrame.Open -> {
                             opened = true
                             stats.opened()
                             banner(connectedAt = System.currentTimeMillis())
                             Log.i(TAG, "push_open")
                         }
-                        PushEvent.Keepalive -> stats.keepalive()
-                        is PushEvent.Message -> {
+                        NtfyFrame.Keepalive -> stats.keepalive()
+                        is NtfyFrame.Message -> {
                             stats.message()
-                            prefs.edit().putString(KEY_LAST_ID, event.id).apply()
-                            banner(received = (NexusBanner.push?.received ?: 0) + 1)
-                            show(event)
+                            prefs.edit().putString(KEY_LAST_ID, frame.id).apply()
+                            when (val push = decodeNexusPush(frame.title, frame.body)) {
+                                is NexusPush.Notification -> {
+                                    banner(received = (NexusBanner.push?.received ?: 0) + 1)
+                                    postPushNotification(this@NexusPushService, frame.id, push.title, push.text)
+                                }
+                                is NexusPush.Nudge -> NexusBannerSync.onNudge(this@NexusPushService, push.jobs)
+                                NexusPush.Other -> Unit
+                            }
                         }
-                        is PushEvent.Nudge -> {
-                            stats.message()
-                            prefs.edit().putString(KEY_LAST_ID, event.id).apply()
-                            NexusBannerSync.onNudge(this@NexusPushService, event.jobs)
-                        }
-                        PushEvent.Other -> Unit
+                        NtfyFrame.Other -> Unit
                     }
                 }
 
@@ -225,8 +240,6 @@ class NexusPushService : Service() {
         NexusBanner.push = line
         NexusBanner.show(this)
     }
-
-    private fun show(message: PushEvent.Message) = postPushNotification(this, message.id, message.title, message.text)
 
     /** `adb shell dumpsys activity service NexusPushService`: counts and times, never a message's text. */
     override fun dump(fd: FileDescriptor?, writer: PrintWriter, args: Array<out String>?) {
@@ -259,6 +272,7 @@ class NexusPushService : Service() {
     companion object {
         private const val TAG = "NexusPush"
         private const val PREFS = "nexus_push"
+        private const val KEY_TRANSPORT = "transport"
         private const val KEY_ADDRESS = "address"
         private const val KEY_KEEPALIVE = "keepaliveSeconds"
         private const val KEY_LAST_ID = "lastId"
