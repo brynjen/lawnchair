@@ -2,6 +2,9 @@ package app.lawnchair.nexus.coder
 
 import java.net.URLEncoder
 import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -30,33 +33,33 @@ data class WaitingQuestion(
     /** The line under the title. */
     val text: String get() = if (onMac) "Needs your answer on the Mac" else question
 
-    /** What the expanded notification says. */
-    fun details(now: Long): String = if (onMac) {
+    /** What the expanded notification says; the time is a clock time, which does not go stale. */
+    fun details(zone: ZoneId = ZoneId.systemDefault()): String = if (onMac) {
         "$question\n\nAnswer it on the Mac, where the conversation is."
     } else {
         listOfNotNull(
             question,
             options.firstOrNull()?.let { "Recommended: $it" },
-            decidedAtMs?.let { decidedIn(it - now) },
+            decidedAtMs?.let { decidedAt(it, zone) },
         ).joinToString("\n\n")
     }
 
-    /** Where a tap opens the app: the question page for a cloud question, the session for a Mac one. */
+    /**
+     * Where a tap opens the app, on its own (`alone=1`, so back leaves the app again): the question
+     * page for a cloud question, the session for a Mac one.
+     */
     val route: String get() {
         val session = URLEncoder.encode(sessionId, Charsets.UTF_8)
-        return if (onMac) "/code/$session" else "/code/$session/question/${URLEncoder.encode(questionId, Charsets.UTF_8)}"
+        val page = if (onMac) "/code/$session" else "/code/$session/question/${URLEncoder.encode(questionId, Charsets.UTF_8)}"
+        return "$page?alone=1"
     }
 }
 
-/** How long until the recommended answer is taken, in the words the app's card uses. */
-fun decidedIn(leftMs: Long): String {
-    val minutes = (leftMs / 60_000).coerceAtLeast(0)
-    return when {
-        minutes < 1 -> "The recommended answer is taken in under a minute."
-        minutes < 60 -> "The recommended answer is taken in $minutes min."
-        else -> "The recommended answer is taken in ${minutes / 60} h ${minutes % 60} min."
-    }
-}
+/** When the recommended answer is taken, as the app's page says it: a clock time in [zone]. */
+fun decidedAt(atMs: Long, zone: ZoneId): String =
+    "The recommended answer is taken at ${
+        LocalTime.ofInstant(Instant.ofEpochMilli(atMs), zone).format(DateTimeFormatter.ofPattern("HH:mm"))
+    }."
 
 /** The host's list; an entry it cannot read is left out. */
 fun parseWaitingQuestions(value: Any?): List<WaitingQuestion> {

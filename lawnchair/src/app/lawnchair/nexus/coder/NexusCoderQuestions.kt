@@ -21,8 +21,9 @@ import kotlinx.coroutines.sync.withLock
  * The questions the person's coding agents wait on, as notifications. The server's nudge
  * ([app.lawnchair.nexus.push.NexusPush.CoderQuestions]) says only that they changed; the list is
  * read over the sealed coder route, each question waiting gets one notification, and one no longer
- * waiting (answered anywhere, or its wait ran out) has its notification taken away. Fetched with the
- * screen off too: a question waits ten minutes by default, and the push socket is up anyway.
+ * waiting (answered anywhere, or its wait ran out) has its notification taken away; a tap alone does
+ * not take it, since the question still waits. Fetched with the screen off too: a question waits ten
+ * minutes by default, and the push socket is up anyway.
  */
 object NexusCoderQuestions {
     private const val TAG = "NexusCoderQuestions"
@@ -60,37 +61,37 @@ object NexusCoderQuestions {
             },
         )
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val now = System.currentTimeMillis()
         val keys = waiting.map { it.key }.toSet()
         for (gone in prefs.getStringSet(KEY_SHOWN, emptySet()).orEmpty() - keys) {
             manager.cancel(notificationId(gone))
         }
         for (question in waiting) {
-            manager.notify(notificationId(question.key), notification(app, question, now))
+            manager.notify(notificationId(question.key), notification(app, question))
         }
         prefs.edit().putStringSet(KEY_SHOWN, keys).apply()
         Log.i(TAG, "coder_questions_shown count=${waiting.size}")
     }
 
-    private fun notification(app: Context, question: WaitingQuestion, now: Long): Notification {
+    private fun notification(app: Context, question: WaitingQuestion): Notification {
         val open = PendingIntent.getActivity(
             app,
             notificationId(question.key),
-            NexusAppActivity.routeIntent(app, question.route),
+            NexusAppActivity.aloneIntent(app, question.route),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return Notification.Builder(app, CHANNEL)
             .setSmallIcon(com.android.launcher3.R.drawable.ic_nexus_status)
             .setContentTitle(question.title)
             .setContentText(question.text.take(160))
-            .setStyle(Notification.BigTextStyle().bigText(question.details(now).take(900)))
+            .setStyle(Notification.BigTextStyle().bigText(question.details().take(900)))
             .setWhen(question.askedAtMs)
             .setShowWhen(true)
             .setCategory(Notification.CATEGORY_MESSAGE)
             .setOnlyAlertOnce(true)
             .setContentIntent(open)
-            .setAutoCancel(true)
-            .apply { question.decidedAtMs?.let { setTimeoutAfter((it - now).coerceAtLeast(1_000)) } }
+            .apply {
+                question.decidedAtMs?.let { setTimeoutAfter((it - System.currentTimeMillis()).coerceAtLeast(1_000)) }
+            }
             .build()
     }
 

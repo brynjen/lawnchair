@@ -57,6 +57,7 @@ class NexusAppActivity : FlutterFragmentActivity() {
         when (intent.getStringExtra(EXTRA_START)) {
             START_HOME -> launcherLine?.invokeMethod("home", null)
             START_ROUTE -> intent.getStringExtra(EXTRA_ROUTE)?.let { launcherLine?.invokeMethod("open", it) }
+            START_ALONE -> intent.getStringExtra(EXTRA_ROUTE)?.let { launcherLine?.invokeMethod("openAlone", it) }
         }
     }
 
@@ -91,10 +92,15 @@ class NexusAppActivity : FlutterFragmentActivity() {
         /** Flutter's own extra: the route a cold start begins at (FlutterActivityLaunchConfigs). */
         private const val EXTRA_ROUTE = "route"
 
-        /** Opens the app at [route] of nexus_mobile's router, over its Home so back lands there. */
-        fun routeIntent(context: Context, route: String): Intent =
+        const val START_ALONE = "alone"
+
+        /**
+         * Opens the app at [route] of nexus_mobile's router on its own, for a notification's tap: the
+         * route carries `alone=1`, and back from it leaves the app again.
+         */
+        fun aloneIntent(context: Context, route: String): Intent =
             Intent(context, NexusAppActivity::class.java)
-                .putExtra(EXTRA_START, START_ROUTE)
+                .putExtra(EXTRA_START, START_ALONE)
                 .putExtra(EXTRA_ROUTE, route)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
 

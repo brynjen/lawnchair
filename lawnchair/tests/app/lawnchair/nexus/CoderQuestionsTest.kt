@@ -1,8 +1,9 @@
 package app.lawnchair.nexus
 
 import app.lawnchair.nexus.coder.WaitingQuestion
-import app.lawnchair.nexus.coder.decidedIn
+import app.lawnchair.nexus.coder.decidedAt
 import app.lawnchair.nexus.coder.parseWaitingQuestions
+import java.time.ZoneId
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,10 +49,10 @@ class CoderQuestionsTest {
         val cloud = parseWaitingQuestions(listed)[0]
         assertEquals("Payroll export", cloud.title)
         assertEquals("Keep the old column names?", cloud.text)
-        assertEquals("/code/s_1/question/q_1", cloud.route)
+        assertEquals("/code/s_1/question/q_1?alone=1", cloud.route)
         assertEquals(
-            "Keep the old column names?\n\nRecommended: Keep them\n\nThe recommended answer is taken in 7 min.",
-            cloud.details(now = cloud.askedAtMs + 180_000),
+            "Keep the old column names?\n\nRecommended: Keep them\n\nThe recommended answer is taken at 16:10.",
+            cloud.details(ZoneId.of("Europe/Oslo")),
         )
     }
 
@@ -60,14 +61,14 @@ class CoderQuestionsTest {
         val mac = parseWaitingQuestions(listed)[1]
         assertEquals("Your agent", mac.title)
         assertEquals("Needs your answer on the Mac", mac.text)
-        assertEquals("/code/s_2", mac.route)
-        assertTrue(mac.details(now = 0).endsWith("Answer it on the Mac, where the conversation is."))
+        assertEquals("/code/s_2?alone=1", mac.route)
+        assertTrue(mac.details().endsWith("Answer it on the Mac, where the conversation is."))
     }
 
     @Test
-    fun `the time left reads in minutes, then hours`() {
-        assertEquals("The recommended answer is taken in under a minute.", decidedIn(30_000))
-        assertEquals("The recommended answer is taken in under a minute.", decidedIn(-5_000))
-        assertEquals("The recommended answer is taken in 1 h 5 min.", decidedIn(65 * 60_000L))
+    fun `the time it is taken reads as a clock time where the phone is`() {
+        val at = java.time.Instant.parse("2026-11-14T23:05:00Z").toEpochMilli()
+        assertEquals("The recommended answer is taken at 00:05.", decidedAt(at, ZoneId.of("Europe/Oslo")))
+        assertEquals("The recommended answer is taken at 23:05.", decidedAt(at, ZoneId.of("UTC")))
     }
 }
