@@ -11,8 +11,9 @@ import org.json.JSONObject
 /**
  * A question one of the person's coding agents waits on, as nexus lists it
  * (`/coder/host/waitingQuestions`, nexus-coder's `WaitingQuestion`). A cloud session's is answered
- * here, on the app's question page; a Mac session's only says the answer is needed on the Mac,
- * where its conversation is.
+ * here, on the app's question page, and so is a Mac session's while the person is away from the Mac
+ * (NexusCoder's window closed, the app in the background). While they are at the Mac ([onMac], nexus's
+ * `atMac`) it only says the answer is needed there, where its conversation is.
  */
 data class WaitingQuestion(
     val sessionId: String,
@@ -80,7 +81,8 @@ private fun waitingQuestionOf(json: JSONObject): WaitingQuestion {
         sessionTitle = json.optString("sessionTitle"),
         question = json.getString("question"),
         options = List(options?.length() ?: 0) { options!!.optString(it) },
-        onMac = json.optString("location") == "mac",
+        // A server from before `atMac` said a Mac question was always answered on the Mac.
+        onMac = json.optBoolean("atMac", json.optString("location") == "mac"),
         decidedAtMs = if (timeoutSeconds > 0) askedAt + timeoutSeconds * 1000 else null,
         askedAtMs = askedAt,
     )

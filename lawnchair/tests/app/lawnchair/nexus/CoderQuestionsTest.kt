@@ -71,4 +71,27 @@ class CoderQuestionsTest {
         assertEquals("The recommended answer is taken at 00:05.", decidedAt(at, ZoneId.of("Europe/Oslo")))
         assertEquals("The recommended answer is taken at 23:05.", decidedAt(at, ZoneId.of("UTC")))
     }
+
+    @Test
+    fun `a Mac question while the person is away from the Mac is answered here, as a cloud one`() {
+        val away = parseWaitingQuestions(
+            JSONArray(
+                """
+                [{"sessionId":"s_2","sessionTitle":"App","location":"mac","atMac":false,
+                  "workspacePath":"/Users/me/app","questionId":"q_3","question":"Which simulator?",
+                  "options":["iPhone 17","iPad"],"askedAt":"2026-11-14T15:01:00.000Z","timeoutSeconds":600},
+                 {"sessionId":"s_3","sessionTitle":"App","location":"mac","atMac":true,
+                  "workspacePath":"/Users/me/app","questionId":"q_4","question":"Ship it?",
+                  "options":[],"askedAt":"2026-11-14T15:01:00.000Z","timeoutSeconds":0}]
+                """.trimIndent(),
+            ),
+        )
+        val (here, there) = away
+        assertFalse(here.onMac)
+        assertEquals("Which simulator?", here.text)
+        assertEquals("/code/s_2/question/q_3?alone=1", here.route)
+        assertTrue(here.details(ZoneId.of("Europe/Oslo")).contains("Recommended: iPhone 17"))
+        assertTrue(there.onMac)
+        assertEquals("Needs your answer on the Mac", there.text)
+    }
 }
