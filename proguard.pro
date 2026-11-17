@@ -30,6 +30,27 @@
 # (sqflite_sqlcipher); shrinking must keep the classes the plugin reaches by name.
 -keep class net.sqlcipher.** { *; }
 
+# The embedded Nexus app's Flutter engine and plugins, kept as a Flutter app's own build keeps
+# them: the engine finds its plugin registrant by name and registers plugins by class, so a plugin
+# R8 merged into another's class is taken for that one and never registered (the release app then
+# has no permissions, no orb view, and stops on its loading screen).
+-keep class io.flutter.** { *; }
+-keep class * implements io.flutter.embedding.engine.plugins.FlutterPlugin { *; }
+-dontwarn io.flutter.embedding.**
+
+# The embedded Nexus app's plugins that reach their Android side over JNI by class and member
+# name (jni, jni_flutter, shared_preferences_android's native interop): renamed, the release
+# app cannot open its settings and stops on its loading screen.
+-keep class com.github.dart_lang.jni.** { *; }
+-keep class com.github.dart_lang.jni_flutter.** { *; }
+-keep class io.flutter.plugins.sharedpreferences.** { *; }
+-keep class kotlin.Unit { *; }
+-keep class kotlin.Result { *; }
+-keep class kotlin.Result$Failure { *; }
+-keep class kotlin.coroutines.Continuation { *; }
+-keep class kotlin.coroutines.intrinsics.CoroutineSingletons { *; }
+-keep class kotlin.coroutines.intrinsics.IntrinsicsKt { *; }
+
 # We intentionally remove it to replace Smartspacer's widget popup with our own Launcher3 popup
 -dontwarn com.skydoves.balloon.*
 
