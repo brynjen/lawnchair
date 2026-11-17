@@ -38,6 +38,28 @@ enum class OrbState {
 /** The renderer's audio band count (the AAR keeps its spec internal). */
 private const val AUDIO_BANDS = 16
 
+/**
+ * The orb's sixteen bands for one loudness [level] at [seconds], shaped like a voice: two formant
+ * peaks that drift as speech's do, a little texture per band and a gentle treble roll-off, all
+ * scaled by the level. The orb's speaking equalizer then raises different mountains as the voice
+ * moves, where flat bands would only swell it as one. The same as `speechBands` in
+ * `nexus_mobile/lib/core/orb/orb.dart`.
+ */
+internal fun speechBands(level: Float, seconds: Double): FloatArray {
+    val a = level.coerceIn(0f, 1f).toDouble()
+    val formantOne = 3.2 + kotlin.math.sin(seconds * 2.65) * 1.15
+    val formantTwo = 9.1 + kotlin.math.sin(seconds * 2.05) * 2.05
+    return FloatArray(AUDIO_BANDS) { band ->
+        val one = kotlin.math.exp(-((band - formantOne) / 2.1).let { it * it })
+        val two = kotlin.math.exp(-((band - formantTwo) / 2.7).let { it * it })
+        val texture = (0.64 +
+            kotlin.math.sin(seconds * (8.4 + band * 0.17) + band * 1.91) * 0.22 +
+            kotlin.math.sin(seconds * 19.3 + band * 0.67) * 0.14).coerceIn(0.16, 1.0)
+        val rolloff = 1 - band / (AUDIO_BANDS * 1.28)
+        minOf(1.0, a * (0.12 + one * 0.85 + two * 0.6) * texture * rolloff).toFloat()
+    }
+}
+
 private fun OrbState.mode(): OrbMode = when (this) {
     OrbState.Idle -> OrbMode.IDLE
     OrbState.Listening -> OrbMode.LISTENING
@@ -150,7 +172,7 @@ fun NeuralOrb(
         view[0]?.controller?.draw(curState.value, curBox.value)
     }
 
-    // The live level as audio bands, about 30 times a second.
+    // The live level as audio bands, about 30 times a second, shaped like speech by speechBands.
     LaunchedEffect(Unit) {
         var last = 0L
         var live = false
@@ -165,11 +187,7 @@ fun NeuralOrb(
                     live = false
                 } else {
                     live = true
-                    val a = level.coerceIn(0f, 1f)
-                    controller.setAudioBands(
-                        0,
-                        FloatArray(AUDIO_BANDS) { i -> a * (1f - i / (AUDIO_BANDS * 1.6f)) },
-                    )
+                    controller.setAudioBands(0, speechBands(level, now / 1e9))
                 }
             }
         }
