@@ -485,11 +485,12 @@ class NexusClient(
     // region streaming — substrate
 
     /**
-     * Opens `substrate.lanes`: the box's eight lanes as the orb draws them, one digit each, a whole
-     * snapshot per packet (the server sends one only when a lane changes, at most 10 a second, and
-     * repeats it every 20 s). Only the newest matters, so a slow collector gets the latest
-     * ([conflate]) rather than a backlog. A packet that does not parse is dropped; the flow completes
-     * when the stream ends and fails when the socket does.
+     * Opens `substrate.modelLanes`: the box's eight lanes as the orb draws them, one digit each, with
+     * the model's work alone (the language model, the embedder and the agents on them; no voice,
+     * painter or Docling). A whole snapshot per packet (the server sends one only when a lane
+     * changes, at most 10 a second, and repeats it every 20 s). Only the newest matters, so a slow
+     * collector gets the latest ([conflate]) rather than a backlog. A packet that does not parse is
+     * dropped; the flow completes when the stream ends and fails when the socket does.
      */
     override fun watchBox(base: String, token: String): Flow<SubstrateFrame> =
         openMethodStream(base, token, ENDPOINT_SUBSTRATE, METHOD_LANES)
@@ -649,7 +650,7 @@ class NexusClient(
         private const val ENDPOINT_SUBSTRATE = "substrate"
         private const val METHOD_STREAM_TURN = "streamTurn"
         private const val METHOD_SEND_AUDIO_CHUNK = "sendAudioChunk"
-        private const val METHOD_LANES = "lanes"
+        private const val METHOD_LANES = "modelLanes"
         private val JSON_MEDIA = "application/json".toMediaType()
 
         /** Build an `omsc` (open method-stream command) frame. [args] is a JSON-encoded STRING. */

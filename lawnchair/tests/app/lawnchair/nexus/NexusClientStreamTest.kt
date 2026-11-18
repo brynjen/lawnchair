@@ -166,7 +166,7 @@ class NexusClientStreamTest {
         assertEquals("omsc", call.getString("type"))
         val data = call.getJSONObject("data")
         assertEquals("substrate", data.getString("en"))
-        assertEquals("lanes", data.getString("m"))
+        assertEquals("modelLanes", data.getString("m"))
         assertEquals("{}", data.getString("args")) // a JSON-encoded string, not an object
         assertEquals("Bearer session-key", data.getString("auth"))
         assertEquals("pong", JSONObject(pong.poll(5, TimeUnit.SECONDS)!!).getString("type"))
