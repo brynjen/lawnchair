@@ -32,9 +32,9 @@ import kotlin.math.sin
  *
  *  - [streamTranscription] drains the *real* mic PCM flow (so capture + chunking are genuinely run
  *    and logged), then emits a scripted partial → final transcript, mimicking whisper.
- *  - [streamTurn] emits scripted text deltas + synthetic **WAV tone** audio segments (played through
- *    the real [app.lawnchair.nexus.voice.NexusTtsPlayer]) + sources, then completes. Set
- *    [failMidway] to exercise the error/red-flash path.
+ *  - [streamTurn] emits reasoning, a web search with its links, then scripted text deltas + synthetic
+ *    **WAV tone** audio segments (played through the real [app.lawnchair.nexus.voice.NexusTtsPlayer]),
+ *    then completes. Set [failMidway] to exercise the error/red-flash path.
  *  - [watchBox] loops a quiet box, then two actors working, so the orb's all-slots draw can be seen;
  *    [newsFeed] and [newsRefresh] answer with four canned cards (a paper with every field, a news card
  *    with a picture, a long title with nothing else, a card with a single key point) and [newsImage]
@@ -92,6 +92,29 @@ class FakeNexusTransport(
         onReady() // triggers the (no-op) submitTurn
         delay(500) // "thinking" beat so the Thinking orb is visible
 
+        // Reasoning, then a web search with its links and result, as the chat draws a turn's work.
+        emit(NexusTurnEvent.Narrator("The person wants today's weather; ", narratorKind = "thinking"))
+        emit(NexusTurnEvent.Narrator("a quick search will do.", narratorKind = "thinking"))
+        delay(300)
+        val search = "call-weather"
+        emit(
+            NexusTurnEvent.Narrator(
+                "weather today",
+                narratorKind = "tool",
+                toolName = "web_search",
+                toolCallId = search,
+                toolArguments = mapOf("query" to "weather today"),
+            ),
+        )
+        delay(1_200)
+        emit(
+            NexusTurnEvent.Sources(
+                listOf(NexusSource("Today's forecast", "https://weather.example.com/today", "weather.example.com")),
+                toolCallId = search,
+            ),
+        )
+        emit(NexusTurnEvent.Narrator("", narratorKind = "toolResult", toolName = "web_search", toolCallId = search, toolResult = "1 result"))
+
         // A pre-generated answer, streamed sentence-by-sentence with a spoken segment each so the
         // Speaking orb pulses to real audio. Text deltas within a sentence arrive word-by-word.
         val sentences = listOf(
@@ -116,7 +139,6 @@ class FakeNexusTransport(
             }
             delay(250)
         }
-        emit(NexusTurnEvent.Sources(listOf(NexusSource("weather.example.com", "https://weather.example.com"))))
         delay(150)
         emit(NexusTurnEvent.Completed())
     }

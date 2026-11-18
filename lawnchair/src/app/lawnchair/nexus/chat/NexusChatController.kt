@@ -8,7 +8,6 @@ import app.lawnchair.nexus.buds.SilenceEndDetector
 import app.lawnchair.nexus.net.AudioSegment
 import app.lawnchair.nexus.net.ChatSubject
 import app.lawnchair.nexus.net.NexusClient
-import app.lawnchair.nexus.net.NexusSource
 import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.net.NexusTurnEvent
 import app.lawnchair.nexus.net.NexusUnauthorizedException
@@ -47,16 +46,12 @@ enum class TurnPhase { Idle, Listening, Thinking, Speaking, AwaitingAnswer, Done
 /** How voice mode was entered — drives the stop-button label (tap-to-stop vs release-to-send). */
 enum class MicGesture { None, Tap, Hold }
 
-/** A bubble: text, or (with [imageUrl]) a picture the assistant drew. */
-data class ChatLine(val fromUser: Boolean, val text: String, val imageUrl: String? = null)
-
 data class NexusChatUiState(
     val mode: Mode,
     val phase: TurnPhase = TurnPhase.Idle,
-    val messages: List<ChatLine> = emptyList(),
+    val transcript: NexusTranscript = NexusTranscript(),
     val input: String = "",
     val userTranscript: String = "",
-    val sources: List<NexusSource> = emptyList(),
     val micGesture: MicGesture = MicGesture.None,
     val failureSignal: Int = 0,
     val errorMessage: String? = null,
@@ -122,7 +117,6 @@ class NexusChatController(
     /** The conversation this controller is in, once it has one. */
     val currentConversationId: Int? get() = conversationId
     private var currentTurnId: String? = null
-    private var answerIndex: Int = -1
     // The `ask_user` question the open turn waits on; the next input answers it.
     private var pendingPromptId: String? = null
 
@@ -162,7 +156,7 @@ class NexusChatController(
     fun send() {
         val query = _state.value.input.trim()
         if (query.isEmpty() || busy) return
-        _state.update { it.copy(input = "", sources = emptyList()) }
+        _state.update { it.copy(input = "") }
         submitUserTurn(query)
     }
 
@@ -282,12 +276,7 @@ class NexusChatController(
             answerPrompt(promptId, text)
             return
         }
-        // Commit the user's line + an empty assistant line to stream into.
-        _state.update {
-            val msgs = it.messages + ChatLine(true, text) + ChatLine(false, "")
-            it.copy(messages = msgs, phase = TurnPhase.Thinking, userTranscript = "")
-        }
-        answerIndex = _state.value.messages.lastIndex
+        _state.update { it.copy(transcript = it.transcript.sent(text), phase = TurnPhase.Thinking, userTranscript = "") }
 
         val turnId = newTurnId()
         currentTurnId = turnId
@@ -335,7 +324,7 @@ class NexusChatController(
             route?.release()
             cancelWatchdog()
             if (_state.value.phase != TurnPhase.Failed) {
-                _state.update { it.copy(phase = TurnPhase.Done) }
+                _state.update { it.copy(phase = TurnPhase.Done, transcript = it.transcript.ended()) }
             }
         }
     }
@@ -344,11 +333,7 @@ class NexusChatController(
     private fun answerPrompt(promptId: String, text: String) {
         pendingPromptId = null
         val cid = conversationId ?: return fail("Couldn't reach Nexus.")
-        _state.update {
-            val msgs = it.messages + ChatLine(true, text) + ChatLine(false, "")
-            it.copy(messages = msgs, phase = TurnPhase.Thinking, userTranscript = "")
-        }
-        answerIndex = _state.value.messages.lastIndex
+        _state.update { it.copy(transcript = it.transcript.sent(text), phase = TurnPhase.Thinking, userTranscript = "") }
         armWatchdog(TurnPhase.Thinking, 120_000, "The assistant took too long.")
         scope.launch {
             runCatching { transport.answerUserPrompt(serverUrl, token, cid, promptId, text) }
@@ -362,7 +347,7 @@ class NexusChatController(
         when (ev) {
             is NexusTurnEvent.TextDelta -> {
                 tokenEnvelope.bump(ev.text.length)
-                appendAnswer(ev.text)
+                record(ev)
                 if (_state.value.phase == TurnPhase.Thinking) {
                     _state.update { it.copy(phase = TurnPhase.Speaking) }
                 }
@@ -375,27 +360,23 @@ class NexusChatController(
                     _state.update { it.copy(phase = TurnPhase.Speaking) }
                 }
             }
-            is NexusTurnEvent.Sources -> _state.update { it.copy(sources = ev.sources) }
-            is NexusTurnEvent.Image -> _state.update {
-                it.copy(messages = it.messages + ChatLine(false, "", imageUrl = ev.url))
-            }
+            is NexusTurnEvent.Sources, is NexusTurnEvent.Image, is NexusTurnEvent.Narrator -> record(ev)
             is NexusTurnEvent.UserPrompt -> {
                 // The turn waits for the answer: show the question, free the input, stop the clock.
                 pendingPromptId = ev.promptId
                 cancelWatchdog()
-                showAssistantLine(ev.question)
-                _state.update { it.copy(phase = TurnPhase.AwaitingAnswer) }
+                _state.update { it.copy(transcript = it.transcript.on(ev), phase = TurnPhase.AwaitingAnswer) }
             }
             is NexusTurnEvent.Failed -> {
                 pendingPromptId = null
                 bumpFailure()
-                showAssistantLine("⚠ ${ev.message}")
-                _state.update { it.copy(phase = TurnPhase.Failed, errorMessage = ev.message) }
+                _state.update { it.copy(transcript = it.transcript.on(ev), phase = TurnPhase.Failed, errorMessage = ev.message) }
             }
-            is NexusTurnEvent.Completed -> Unit // settled after drain
-            is NexusTurnEvent.Narrator -> Unit // pre-roll narration — not shown in this UI
+            is NexusTurnEvent.Completed -> record(ev) // the phase settles after drain
         }
     }
+
+    private fun record(ev: NexusTurnEvent) = _state.update { it.copy(transcript = it.transcript.on(ev)) }
 
     // endregion
 
@@ -415,6 +396,7 @@ class NexusChatController(
         route?.release()
         pendingPromptId = null
         reset(TurnPhase.Idle)
+        _state.update { it.copy(transcript = it.transcript.ended()) }
         if (conversation != null) {
             scope.launch { runCatching { transport.cancelTurn(serverUrl, token, conversation, heard) } }
         }
@@ -463,37 +445,6 @@ class NexusChatController(
             ?.also { conversationId = it }
     }
 
-    private fun appendAnswer(delta: String) {
-        val i = answerIndex
-        _state.update { s ->
-            if (i !in s.messages.indices) return@update s
-            val cur = s.messages[i]
-            val msgs = s.messages.toMutableList()
-            msgs[i] = cur.copy(text = cur.text + delta)
-            s.copy(messages = msgs)
-        }
-    }
-
-    /**
-     * Put [text] in the current answer bubble while it is empty, otherwise in a new assistant bubble
-     * after it — a failure or a question must be visible even mid-answer.
-     */
-    private fun showAssistantLine(text: String) {
-        if (text.isEmpty()) return
-        val i = answerIndex
-        _state.update { s ->
-            val cur = s.messages.getOrNull(i)
-            if (cur != null && !cur.fromUser && cur.imageUrl == null && cur.text.isEmpty()) {
-                val msgs = s.messages.toMutableList()
-                msgs[i] = cur.copy(text = text)
-                s.copy(messages = msgs)
-            } else {
-                s.copy(messages = s.messages + ChatLine(false, text))
-            }
-        }
-        answerIndex = _state.value.messages.lastIndex
-    }
-
     private fun bumpFailure() = _state.update { it.copy(failureSignal = it.failureSignal + 1) }
 
     /** The sentence for a failed call: a refused session key says to sign in again. */
@@ -510,8 +461,7 @@ class NexusChatController(
         route?.release()
         pendingPromptId = null
         bumpFailure()
-        showAssistantLine("⚠ $message")
-        _state.update { it.copy(phase = TurnPhase.Failed, errorMessage = message) }
+        _state.update { it.copy(transcript = it.transcript.failed(message), phase = TurnPhase.Failed, errorMessage = message) }
     }
 
     private fun reset(phase: TurnPhase) {

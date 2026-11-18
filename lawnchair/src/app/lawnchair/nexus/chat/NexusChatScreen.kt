@@ -46,6 +46,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,7 +75,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import app.lawnchair.nexus.net.NexusSource
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import app.lawnchair.nexuslauncher.NeuralOrb
@@ -83,12 +83,13 @@ import app.lawnchair.nexuslauncher.OrbState
 // Nexus design tokens (mirrors nexus_mobile core/tokens.dart, dark palette).
 private val Bg = Color(0xFF0A0A12)
 private val Surface = Color(0xFF14141E)
-private val Surface2 = Color(0xFF1C1C2A)
-private val BorderC = Color(0x14FFFFFF)
-private val TextC = Color(0xFFF0F0F5)
-private val Text2 = Color(0x9EF0F0F5)
-private val Text3 = Color(0x61F0F0F5)
-private val Accent = Color(0xFF7AB8FF)
+internal val Surface2 = Color(0xFF1C1C2A)
+internal val BorderC = Color(0x14FFFFFF)
+internal val TextC = Color(0xFFF0F0F5)
+internal val Text2 = Color(0x9EF0F0F5)
+internal val Text3 = Color(0x61F0F0F5)
+internal val Accent = Color(0xFF7AB8FF)
+internal val Bad = Color(0xFFF87171)
 private val Good = Color(0xFF5EEAD4)
 private val OnAccent = Color(0xFF0A1828)
 private val OnGood = Color(0xFF063A33)
@@ -194,7 +195,7 @@ private fun BoxScope.TextLayout(
     } + 8.dp
     // With no messages yet, dim only a thin band just above the text field; once bubbles appear,
     // extend the dimming up over the chat area.
-    val empty = state.messages.isEmpty()
+    val empty = state.transcript.blocks.isEmpty()
     PartialScrim(
         appear,
         fadeStart = if (empty) 0.80f else 0.12f,
@@ -273,7 +274,7 @@ private fun BoxScope.SheetLayout(
         label = "sheetDrag",
     )
     // Asking a question under the article answers at once; the keyboard waits for a tap then.
-    val raiseKeyboard = remember { state.messages.isEmpty() }
+    val raiseKeyboard = remember { state.transcript.blocks.isEmpty() }
     val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
     Box(
@@ -455,7 +456,9 @@ private fun Conversation(
     bottomAnchored: Boolean = false,
 ) {
     val scroll = rememberScrollState()
-    LaunchedEffect(state.messages.size, state.messages.lastOrNull()?.text?.length) {
+    val blocks = state.transcript.blocks
+    val rows = remember(blocks) { rowsOf(blocks) }
+    LaunchedEffect(blocks) {
         scroll.animateScrollTo(scroll.maxValue)
     }
     val content: @Composable () -> Unit = {
@@ -464,19 +467,21 @@ private fun Conversation(
                 .fillMaxWidth()
                 .verticalScroll(scroll)
                 .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (state.messages.isEmpty() && state.userTranscript.isEmpty()) {
+            if (blocks.isEmpty() && state.userTranscript.isEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 BasicText(
                     text = controller.subject?.let { "Ask about “${it.title}”." } ?: "Ask Nexus anything.",
                     style = TextStyle(color = Text3, fontSize = 15.sp),
                 )
             }
-            state.messages.forEach { line ->
-                if (line.imageUrl != null) ImageBubble(line.imageUrl, controller) else MessageBubble(line)
+            rows.forEach { row ->
+                key(row.key) {
+                    ChatRowView(row, image = { Box(Modifier.padding(vertical = 6.dp)) { ImageBubble(it, controller) } })
+                }
             }
-            if (state.sources.isNotEmpty()) SourcesBlock(state.sources)
+            // Sent, and nothing back yet.
+            if (state.phase == TurnPhase.Thinking && blocks.lastOrNull() is UserTurn) PendingLine()
             Spacer(Modifier.height(12.dp))
         }
     }
@@ -576,59 +581,6 @@ private fun Composer(
     }
 }
 
-@Composable
-private fun MessageBubble(line: ChatLine) {
-    val isUser = line.fromUser
-    val maxWidth = (LocalConfiguration.current.screenWidthDp * 0.85f).dp
-    // Tail corner (6dp) on the sender's inner-bottom corner, mirroring the Flutter TextBubble.
-    val shape = RoundedCornerShape(
-        topStart = 18.dp,
-        topEnd = 18.dp,
-        bottomStart = if (isUser) 18.dp else 6.dp,
-        bottomEnd = if (isUser) 6.dp else 18.dp,
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-    ) {
-        Column(
-            modifier = Modifier.widthIn(max = maxWidth),
-            horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
-        ) {
-            if (!isUser) {
-                // "● NEXUS" header above the assistant bubble.
-                Row(
-                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(5.dp).clip(CircleShape).background(Accent))
-                    Spacer(Modifier.width(6.dp))
-                    BasicText(
-                        text = "NEXUS",
-                        style = TextStyle(color = Accent, fontSize = 10.sp, letterSpacing = 1.4.sp),
-                    )
-                }
-            }
-            Box(
-                modifier = Modifier
-                    .clip(shape)
-                    .background(if (isUser) Accent else Surface)
-                    .then(if (isUser) Modifier else Modifier.border(1.dp, BorderC, shape))
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-            ) {
-                BasicText(
-                    text = line.text.ifEmpty { "…" },
-                    style = TextStyle(
-                        color = if (isUser) OnAccent else TextC,
-                        fontSize = 14.5.sp,
-                        letterSpacing = (-0.1).sp,
-                    ),
-                )
-            }
-        }
-    }
-}
-
 /**
  * A picture the assistant drew, fetched from the server's `/uploads` with the access token (the
  * mobile app's `ServerImage`). Tap for full screen.
@@ -677,37 +629,6 @@ private fun ImageBubble(path: String, controller: NexusChatController) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun SourcesBlock(sources: List<NexusSource>) {
-    val context = LocalContext.current
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        BasicText(
-            text = "Sources",
-            style = TextStyle(color = Text3, fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-        )
-        sources.forEach { s ->
-            BasicText(
-                text = s.title.ifEmpty { s.url },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                style = TextStyle(color = Accent, fontSize = 13.sp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        runCatching {
-                            context.startActivity(
-                                android.content.Intent(
-                                    android.content.Intent.ACTION_VIEW,
-                                    android.net.Uri.parse(s.url),
-                                ),
-                            )
-                        }
-                    },
-            )
         }
     }
 }

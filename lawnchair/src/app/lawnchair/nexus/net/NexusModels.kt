@@ -46,19 +46,29 @@ sealed interface NexusTurnEvent {
     /** Append [text] to the running answer. */
     data class TextDelta(val text: String, override val turnId: String? = null) : NexusTurnEvent
 
-    /** Narrator pre-roll text (short "thinking out loud" line). */
+    /**
+     * A narrator chunk, by [narratorKind]: a line said or shown, the model's reasoning (`thinking`,
+     * `reasoning`), or a tool call starting (`tool`: [toolCallId], [toolName], [toolArguments], and
+     * [text] what it is about), running (`toolProgress`) or ending (`toolResult`: [toolResult],
+     * [toolFailed]). Servers before the call ids leave those null.
+     */
     data class Narrator(
         val text: String,
         val narratorKind: String? = null,
         val audible: Boolean? = null,
         val toolName: String? = null,
         override val turnId: String? = null,
+        val toolCallId: String? = null,
+        val toolArguments: Map<String, String> = emptyMap(),
+        val toolResult: String? = null,
+        val toolFailed: Boolean? = null,
     ) : NexusTurnEvent
 
-    /** Web/search citations for the answer. */
+    /** Links a tool call found; [toolCallId] is the call's, null from servers before the call ids. */
     data class Sources(
         val sources: List<NexusSource>,
         override val turnId: String? = null,
+        val toolCallId: String? = null,
     ) : NexusTurnEvent
 
     /** A chunk of spoken TTS audio — one sentence of Ogg/Opus, base64-decoded to [opusBytes]. */
@@ -113,10 +123,11 @@ sealed interface NexusTurnEvent {
     data class Failed(val message: String, override val turnId: String? = null) : NexusTurnEvent
 }
 
-/** A single citation from a `searchSources` event. */
+/** A single citation from a `searchSources` event; [host] is the server's, empty from older ones. */
 data class NexusSource(
     val title: String,
     val url: String,
+    val host: String = "",
 )
 
 /**

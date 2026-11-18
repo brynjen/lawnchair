@@ -434,8 +434,9 @@ class NexusClient(
         }
 
     /** Read a stream message's `data.o.data` → a [NexusTurnEvent], or null for ignored kinds. */
-    private fun parseTurnEvent(data: JSONObject): NexusTurnEvent? {
+    internal fun parseTurnEvent(data: JSONObject): NexusTurnEvent? {
         val turnId = data.optString("turnId", "").ifEmpty { null }
+        val toolCallId = data.optString("toolCallId", "").ifEmpty { null }
         return when (data.optString("kind")) {
             "textDelta" -> NexusTurnEvent.TextDelta(data.optString("textDelta", ""), turnId)
             "narratorChunk" -> NexusTurnEvent.Narrator(
@@ -444,6 +445,10 @@ class NexusClient(
                 audible = if (data.has("audible")) data.optBoolean("audible") else null,
                 toolName = data.optString("toolName", "").ifEmpty { null },
                 turnId = turnId,
+                toolCallId = toolCallId,
+                toolArguments = toolArguments(data.optString("toolArguments", "")),
+                toolResult = data.optString("toolResult", "").ifEmpty { null },
+                toolFailed = if (data.has("toolFailed")) data.optBoolean("toolFailed") else null,
             )
             "searchSources" -> {
                 val arr = data.optJSONArray("sources") ?: JSONArray()
@@ -452,10 +457,11 @@ class NexusClient(
                         NexusSource(
                             title = it.optString("title", it.optString("url", "")),
                             url = it.optString("url", ""),
+                            host = it.optString("host", ""),
                         )
                     }
                 }
-                NexusTurnEvent.Sources(sources, turnId)
+                NexusTurnEvent.Sources(sources, turnId, toolCallId)
             }
             "audio" -> {
                 val b64 = data.optString("audioDataBase64", "")
@@ -478,6 +484,12 @@ class NexusClient(
             "failed" -> NexusTurnEvent.Failed(data.optString("errorMessage", "turn failed"), turnId)
             else -> null // heartbeat — nothing to show
         }
+    }
+
+    /** A call's arguments (`toolArguments`, a JSON object as a string), each value as text. */
+    private fun toolArguments(json: String): Map<String, String> {
+        val arguments = runCatching { JSONObject(json) }.getOrNull() ?: return emptyMap()
+        return arguments.keys().asSequence().associateWith { arguments.optString(it) }
     }
 
     // endregion
