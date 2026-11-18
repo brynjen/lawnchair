@@ -41,13 +41,39 @@ class NexusTtsPlayer(
     @Volatile
     private var current: MediaPlayer? = null
 
+    // How loud the segment playing now is over its length, and whether the reply's audio could be
+    // read that way at all (see [speechLevel]).
+    @Volatile
+    private var envelope: SpeechEnvelope? = null
+
+    @Volatile
+    private var readable = false
+
     private val drainJob: Job = scope.launch {
         for (seg in queue) {
             currentSegmentIndex = seg.segmentIndex
+            val read = SpeechEnvelope.fromOgg(seg.bytes)
+            envelope = read
+            readable = read != null
             onSegmentStarted(seg.segmentIndex)
             // Degrade gracefully on decode failure; the turn (text + orb) goes on.
             runCatching { playSegment(seg) }.onFailure { Log.w(TAG, "segment ${seg.segmentIndex} not played", it) }
+            envelope = null
         }
+    }
+
+    /**
+     * How loud the speech playing right now is, 0..1, read from the playing segment's own audio at
+     * the player's position ([SpeechEnvelope]): it rises and falls with the syllables. 0 between two
+     * sentences; null when the audio says nothing of its loudness (a WAV in simulation), or before
+     * any has played.
+     */
+    fun speechLevel(): Float? {
+        if (!readable) return null
+        val player = current ?: return 0f
+        val read = envelope ?: return 0f
+        val position = runCatching { player.currentPosition }.getOrNull() ?: return 0f
+        return read.at(position.toDouble())
     }
 
     /** Queue a segment for playback. */
@@ -81,6 +107,8 @@ class NexusTtsPlayer(
         current?.let { p -> runCatching { p.stop() }; runCatching { p.release() } }
         current = null
         currentSegmentIndex = null
+        envelope = null
+        readable = false
     }
 
     private suspend fun playSegment(seg: AudioSegment) = suspendCancellableCoroutine { cont ->

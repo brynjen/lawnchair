@@ -16,6 +16,7 @@ import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.NexusTransport
 import app.lawnchair.nexus.buds.NexusMicPrefs
 import app.lawnchair.nexus.voice.NexusAudioRoute
+import app.lawnchair.nexus.voice.SpeechMotion
 import com.android.launcher3.InsettableFrameLayout
 
 /**
@@ -58,6 +59,7 @@ class NexusChatOverlay(private val launcher: LawnchairLauncher) {
             transport, serverUrl, token, mode, gesture, subject,
             route = NexusAudioRoute(launcher),
             micPrefs = { NexusMicPrefs.read(launcher) },
+            speechMotion = { SpeechMotion.read(launcher) },
         )
         controller = ctrl
 

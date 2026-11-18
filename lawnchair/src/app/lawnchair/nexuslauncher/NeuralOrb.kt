@@ -42,11 +42,11 @@ private const val AUDIO_BANDS = 16
  * The orb's sixteen bands for one loudness [level] at [seconds], shaped like a voice: two formant
  * peaks that drift as speech's do, a little texture per band and a gentle treble roll-off, all
  * scaled by the level. The orb's speaking equalizer then raises different mountains as the voice
- * moves, where flat bands would only swell it as one. The same as `speechBands` in
- * `nexus_mobile/lib/core/orb/orb.dart`.
+ * moves, where flat bands would only swell it as one. A level over 1 drives the bands harder, the
+ * strongest to their top. The same as `speechBands` in `nexus_mobile/lib/core/orb/orb.dart`.
  */
 internal fun speechBands(level: Float, seconds: Double): FloatArray {
-    val a = level.coerceIn(0f, 1f).toDouble()
+    val a = level.coerceAtLeast(0f).toDouble()
     val formantOne = 3.2 + kotlin.math.sin(seconds * 2.65) * 1.15
     val formantTwo = 9.1 + kotlin.math.sin(seconds * 2.05) * 2.05
     return FloatArray(AUDIO_BANDS) { band ->

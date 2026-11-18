@@ -16,7 +16,9 @@ import app.lawnchair.nexus.voice.NexusAudioCapture
 import app.lawnchair.nexus.voice.NexusAudioRoute
 import app.lawnchair.nexus.voice.NexusTtsPlayer
 import app.lawnchair.nexus.voice.TokenEnvelope
+import app.lawnchair.nexus.voice.SpeechMotion
 import app.lawnchair.nexus.voice.TtsEnvelope
+import app.lawnchair.nexus.voice.speechLevelFor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,6 +87,8 @@ class NexusChatController(
     private val micPrefs: () -> NexusMicPrefs = { NexusMicPrefs() },
     /** Whether to follow what the whole box is doing (the orb's); a turn with no screen has no orb. */
     watchBox: Boolean = true,
+    /** What drives the speaking orb (the app's Appearance → When speaking), read as the orb asks. */
+    private val speechMotion: () -> SpeechMotion = { SpeechMotion.VOICE },
 ) {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -137,12 +141,17 @@ class NexusChatController(
 
     /**
      * Live amplitude for the orb's `externalAmplitude`. Invoked per frame by the orb (not via
-     * recomposition): mic loudness while Listening, the TTS/token envelope while Speaking, else null
-     * (the orb falls back to its synthetic curves).
+     * recomposition): mic loudness while Listening; while Speaking, the voice's own loudness as it
+     * plays, shaped by the person's [speechMotion] (failing that, or with Pulses, the TTS/token
+     * envelope); else null (the orb falls back to its synthetic curves).
      */
     fun externalAmplitude(): Float? = when (_state.value.phase) {
         TurnPhase.Listening -> capture?.amplitude?.value
-        TurnPhase.Speaking -> max(ttsEnvelope.level(), tokenEnvelope.level())
+        TurnPhase.Speaking -> {
+            val motion = speechMotion()
+            val voice = if (motion == SpeechMotion.PULSES) null else ttsPlayer?.speechLevel()
+            if (voice != null) speechLevelFor(motion, voice) else max(ttsEnvelope.level(), tokenEnvelope.level())
+        }
         else -> null
     }
 
