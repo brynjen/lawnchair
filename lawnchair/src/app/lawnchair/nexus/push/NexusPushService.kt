@@ -18,6 +18,7 @@ import app.lawnchair.nexus.NexusBanner
 import app.lawnchair.nexus.NexusBannerSync
 import app.lawnchair.nexus.NexusConfig
 import app.lawnchair.nexus.coder.NexusCoderQuestions
+import app.lawnchair.nexus.cyber.NexusCyberCards
 import app.lawnchair.nexus.net.NexusClient
 import app.lawnchair.nexus.net.networkUp
 import androidx.core.app.ServiceCompat
@@ -209,6 +210,7 @@ class NexusPushService : Service() {
                                 }
                                 is NexusPush.Nudge -> NexusBannerSync.onNudge(this@NexusPushService, push.jobs)
                                 NexusPush.CoderQuestions -> NexusCoderQuestions.onNudge(this@NexusPushService)
+                                NexusPush.CyberCards -> NexusCyberCards.onNudge(this@NexusPushService)
                                 NexusPush.Other -> Unit
                             }
                         }

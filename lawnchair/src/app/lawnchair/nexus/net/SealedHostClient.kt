@@ -1,4 +1,4 @@
-package app.lawnchair.nexus.coder
+package app.lawnchair.nexus.net
 
 import java.io.IOException
 import java.net.URL
@@ -12,14 +12,15 @@ import no.nordli.nexus.health.sync.seal.SealedReply
 import org.json.JSONObject
 
 /**
- * A call on nexus's sealed coder host route, `POST /coder/host/<call>`, as nexus_mobile's
- * `CoderHostClient` makes it: the request sealed to the relay's key, the reply `{"value": …}`
+ * A call on one of nexus's sealed host routes, `POST /<app>/host/<call>` (`coder`, `cyber`), as
+ * nexus_mobile's clients make it: the request sealed to the relay's key, the reply `{"value": …}`
  * sealed back, and a reply that is not sealed refused. It seals with `health_sync`'s Kotlin port
  * (`seal/SealedPayload.kt`), which the app's AAR already puts in this APK (nexus's
  * docs/client-sealing.md: build on that port, never a second one).
  */
-class CoderHostClient(
+class SealedHostClient(
     baseUrl: String,
+    private val app: String,
     private val authKey: String,
     private val sealPublicKey: ByteArray,
     private val transport: HttpTransport = UrlConnectionTransport,
@@ -32,7 +33,7 @@ class CoderHostClient(
 
     /** The call's `value`, which is JSON of any kind. */
     fun call(name: String, arguments: JSONObject = JSONObject()): Any? {
-        val url = URL("$base/coder/host/$name")
+        val url = URL("$base/$app/host/$name")
         val sealed = SealedPayload.seal(arguments.toString().toByteArray(), sealPublicKey, "POST", url.file, JSON)
         val reply = transport.post(
             url,

@@ -24,6 +24,12 @@ sealed interface NexusPush {
      */
     data object CoderQuestions : NexusPush
 
+    /**
+     * The server's word that the cards waiting on the household in nexus-cyber changed: never
+     * shown. The phone asks for them over the sealed cyber route ([app.lawnchair.nexus.cyber]).
+     */
+    data object CyberCards : NexusPush
+
     /** A word of Nexus's own that this build does not know: not a notification either. */
     data object Other : NexusPush
 }
@@ -36,6 +42,7 @@ fun decodeNexusPush(title: String, body: String): NexusPush {
             NexusPush.Nudge(List(jobs?.length() ?: 0) { jobs!!.optInt(it) })
         }
         word?.optString("nexus") == "coder" -> NexusPush.CoderQuestions
+        word?.optString("nexus") == "cyber" -> NexusPush.CyberCards
         word?.has("nexus") == true -> NexusPush.Other
         else -> NexusPush.Notification(title, body)
     }

@@ -9,6 +9,7 @@ import android.util.Base64
 import android.util.Log
 import app.lawnchair.nexus.NexusAppActivity
 import app.lawnchair.nexus.NexusConfig
+import app.lawnchair.nexus.net.SealedHostClient
 import com.android.launcher3.BuildConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +52,7 @@ object NexusCoderQuestions {
         if (BuildConfig.NEXUS_RELAY_PUBLIC_KEY.isBlank()) return
         val status = NexusConfig.read(app)
         if (!status.enabled) return
-        val host = CoderHostClient(status.serverUrl, status.authKey, sealKey)
+        val host = SealedHostClient(status.serverUrl, "coder", status.authKey, sealKey)
         runCatching { parseWaitingQuestions(host.call("waitingQuestions")) }
             .onFailure { Log.w(TAG, "coder_questions_fetch_failed ${it.javaClass.simpleName}") }
             .getOrNull()
